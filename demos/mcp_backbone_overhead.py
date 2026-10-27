@@ -46,6 +46,11 @@ DEAD = "http://127.0.0.1:9"  # the discard port: nothing listens there
 MODES = ["off", "on", "dead"]
 SQL = "select title, rental_rate from film order by rental_rate desc limit 3"
 TREES = 2000  # span trees timed per process
+# A run is discarded if the 1-minute load average goes above the number of
+# CPUs: other work on the machine then swamps what is being measured. (It
+# happened: other sessions' builds pushed the load to 72 on 8 cores and the
+# round medians to 29-103 ms.) A run won't start above half of that.
+CPUS = os.cpu_count() or 1
 OUT = Path(__file__).resolve().parent.parent / "docs" / "mcp-backbone-overhead"
 
 
@@ -158,14 +163,19 @@ def _viewer_is_up() -> bool:
 async def run(checkout: Path, calls: int, warmup: int, rounds: int) -> None:
     if not _viewer_is_up():
         sys.exit("the viewer isn't running: docker compose -f viewer/compose.yaml up -d")
+    if (load := os.getloadavg()[0]) > CPUS / 2:
+        sys.exit(f"the machine is busy (load {load:.1f} on {CPUS} CPUs): rerun when it's idle")
     samples: dict[str, list[float]] = {m: [] for m in MODES}
     trees: dict[str, list[float]] = {m: [] for m in MODES}
     shutdowns: dict[str, list[float]] = {m: [] for m in MODES}
+    per_round: list[dict[str, object]] = []
+    loads: list[float] = []
     # Its own rate limit, high: 3 modes x rounds x (warmup + calls) queries.
     async with seeded(query_rate_limit=10**9) as api_key:
         for r in range(rounds):
             order = MODES[r % 3 :] + MODES[: r % 3]
             for mode in order:
+                loads.append(os.getloadavg()[0])
                 out = await asyncio.to_thread(
                     subprocess.run,
                     [sys.executable, __file__, "measure", mode, str(calls), str(warmup)],
@@ -178,9 +188,25 @@ async def run(checkout: Path, calls: int, warmup: int, rounds: int) -> None:
                 samples[mode] += result["samples_us"]
                 trees[mode] += result["tree_us"]
                 shutdowns[mode].append(result["shutdown_ms"])
+                loads.append(os.getloadavg()[0])
+                per_round.append(
+                    {
+                        "round": r + 1,
+                        "mode": mode,
+                        "call_p50_us": statistics.median(result["samples_us"]),
+                        "span_tree_p50_us": statistics.median(result["tree_us"]),
+                    }
+                )
                 print(
                     f"round {r + 1}, {mode}: p50 {statistics.median(result['samples_us']):.0f} µs"
+                    f" (load {loads[-1]:.1f})"
                 )
+
+    if max(loads) > CPUS:
+        sys.exit(
+            f"discarded: the load average reached {max(loads):.1f} on {CPUS} CPUs during the"
+            " run, so other work swamped the measurement. Nothing written; rerun when idle."
+        )
 
     rng = random.Random(6)
     stats: dict[str, dict[str, float]] = {}
@@ -212,11 +238,14 @@ async def run(checkout: Path, calls: int, warmup: int, rounds: int) -> None:
         "warmup_per_process": warmup,
         "span_trees_per_mode": TREES * rounds,
         "rounds": rounds,
+        "cpus": CPUS,
+        "max_load_1min": max(loads),
     }
     OUT.with_suffix(".json").write_text(
-        json.dumps({"environment": environment, "results": stats}, indent=2) + "\n"
+        json.dumps({"environment": environment, "results": stats, "per_round": per_round}, indent=2)
+        + "\n"
     )
-    OUT.with_suffix(".md").write_text(_report(environment, stats))
+    OUT.with_suffix(".md").write_text(_report(environment, stats, per_round))
     print(f"wrote {OUT.with_suffix('.md').name} and {OUT.with_suffix('.json').name}")
 
 
@@ -231,7 +260,9 @@ def _git_version(checkout: Path) -> str:
     return out.stdout.strip() or "unknown"
 
 
-def _report(env: dict[str, object], stats: dict[str, dict[str, float]]) -> str:
+def _report(
+    env: dict[str, object], stats: dict[str, dict[str, float]], per_round: list[dict[str, object]]
+) -> str:
     def ms(us: float) -> str:
         return f"{us / 1000:.2f} ms"
 
@@ -250,6 +281,11 @@ def _report(env: dict[str, object], stats: dict[str, dict[str, float]]) -> str:
             f"| {label} | {s['span_tree_p50_us']:.1f} µs | {s['span_tree_p95_us']:.1f} µs "
             f"| {s['shutdown_ms_max']:.0f} ms |"
         )
+    rounds = [
+        f"| {p['round']} | {labels[str(p['mode'])]} | {ms(float(p['call_p50_us']))} "  # type: ignore[arg-type]
+        f"| {float(p['span_tree_p50_us']):.1f} µs |"  # type: ignore[arg-type]
+        for p in per_round
+    ]
     off, on = stats["off"], stats["on"]
     tree_cost = on["span_tree_p50_us"] - off["span_tree_p50_us"]
     return f"""# MCP-backbone: what tracing costs a tool call
@@ -292,6 +328,13 @@ the query and the audit write). That varies by far more than the tracing
 work above, so the difference between modes here is noise unless its
 interval excludes zero. The interval is a bootstrap over the medians.
 
+Per process, in the order run (a round's three modes ran back to back,
+so drift shows up as whole rounds moving together):
+
+| Round | Tracing | Call p50 | Span tree p50 |
+|---|---|---|---|
+{chr(10).join(rounds)}
+
 ## Limits
 
 - One laptop, a local database, one cheap query.
@@ -302,7 +345,8 @@ interval excludes zero. The interval is a bootstrap over the medians.
 - "Off" is the default: with no endpoint there is no tracer provider and
   no export connection.
 
-Environment: {env["machine"]}, Python {env["python"]}, mcp {env["mcp"]},
+Environment: {env["machine"]} ({env["cpus"]} CPUs; the 1-minute load
+average stayed at or below {env["max_load_1min"]:.1f}), Python {env["python"]}, mcp {env["mcp"]},
 opentelemetry-sdk {env["opentelemetry-sdk"]}, MCP-backbone
 `{env["mcp_backbone_version"]}`, {env["database"]}.
 """
