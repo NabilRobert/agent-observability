@@ -1,0 +1,57 @@
+# Jaeger v2 (an OpenTelemetry Collector distribution): receives OTLP over
+# HTTP, stores traces in Badger on disk, serves the UI and query API.
+# Phase 5, ADR-001. Ports are published on loopback only (compose.yaml).
+service:
+  extensions: [jaeger_storage, jaeger_query, healthcheckv2]
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [jaeger_storage_exporter]
+  telemetry:
+    resource:
+      attributes:
+        - name: service.name
+          value: jaeger
+    metrics:
+      level: none
+    logs:
+      level: info
+
+extensions:
+  healthcheckv2:
+    use_v2: true
+    http:
+      endpoint: 0.0.0.0:13133
+
+  jaeger_query:
+    storage:
+      traces: badger_store
+    http:
+      endpoint: 0.0.0.0:16686
+
+  jaeger_storage:
+    backends:
+      badger_store:
+        badger:
+          # /tmp is the image's declared volume; compose mounts a named
+          # volume there, so traces survive a restart.
+          directories:
+            keys: /tmp/jaeger/keys
+            values: /tmp/jaeger/values
+          ephemeral: false
+          ttl:
+            spans: 720h # 30 days
+
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  batch:
+
+exporters:
+  jaeger_storage_exporter:
+    trace_storage: badger_store
