@@ -47,15 +47,17 @@ and cost.
   same parent, start time (to the microsecond) and duration; the
   model-call costs in each run add up to its recorded total (26 runs had
   one). `0 problems` on all 62 runs, checked against the viewer's API.
-- **Cheap at the median; the tail is not yet explained.** Tracing one
-  MCP-backbone tool call costs about **85 µs** of CPU (112 µs with tracing
-  on, 27 µs with it off), steady across nine processes: **0.3%** of a
-  28 ms call. The median whole call didn't move (−0.27 ms, 95% CI −0.58
-  to +0.05), but the tail got worse with tracing on: p95 went from 46 to
-  60 ms (viewer up) and 54 ms (viewer down), p99 from 91 to 126 and
-  160 ms. That is not yet tested (no interval on p95/p99), so it may be
-  drift or real, for example the export thread competing for the
-  interpreter lock. Details:
+- **Cheap, measured at the median and the tail.** Tracing adds
+  **+0.39 ms** to the median MCP-backbone tool call (95% CI +0.29 to
+  +0.50), **1.4%** of a 27 ms call, with the viewer up; building the spans
+  is about 80 µs of that (110 µs on, 31 µs off). At p95 and p99 there is
+  no detectable difference (+1.7 ms, CI −1.2 to +4.6; −0.3 ms, CI −13 to
+  +12). A first run showed p99 rising from 91 to 126 ms, but it ran while
+  the machine's load drifted upwards; on a quiet machine it didn't
+  reproduce. The one tail effect found: the 24 of 1,500 calls that ran
+  while the exporter was sending were all slower than the untraced p95,
+  against 4.3% of the other calls, so a send does slow the calls it
+  overlaps, but too rarely to move p99. Details:
   [`docs/mcp-backbone-overhead.md`](docs/mcp-backbone-overhead.md).
 - **Small.** Jaeger runs in 256 MB; it used 95 MiB with everything above
   loaded.

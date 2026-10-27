@@ -11,12 +11,12 @@ stage spans) through MCP-backbone's own tracer, timed
 
 | Tracing | p50 | p95 | Shutdown, worst |
 |---|---|---|---|
-| Off (no endpoint) | 27.4 µs | 32.1 µs | 0 ms |
-| On, viewer up | 112.0 µs | 146.4 µs | 193 ms |
-| On, viewer down | 111.8 µs | 147.1 µs | 2010 ms |
+| Off (no endpoint) | 30.6 µs | 50.8 µs | 0 ms |
+| On, viewer up | 110.8 µs | 139.4 µs | 63 ms |
+| On, viewer down | 111.9 µs | 151.0 µs | 2009 ms |
 
-With the viewer up, tracing a call costs about **85 µs** of
-CPU at the median, against 27.4 µs when it is off
+With the viewer up, tracing a call costs about **80 µs** of
+CPU at the median, against 30.6 µs when it is off
 (no-op spans). That is 0.3% of an untraced
 call's median time below. The export runs in a background thread and
 isn't part of this. "Shutdown" is the tracer's final flush when the
@@ -30,32 +30,55 @@ its 2 s cap, and the spans still queued are lost.
 process per mode and round, 3 rounds in rotating order,
 after 50 untimed calls per process:
 
-| Tracing | p50 | p95 | p99 | Added at p50 (95% CI) |
-|---|---|---|---|---|
-| Off (no endpoint) | 28.37 ms | 45.96 ms | 91.22 ms | – |
-| On, viewer up | 28.09 ms | 60.31 ms | 126.40 ms | -0.27 ms (-0.58 to +0.05) |
-| On, viewer down | 28.89 ms | 53.93 ms | 159.77 ms | +0.52 ms (+0.15 to +0.91) |
+| Tracing | p50 | p95 | p99 |
+|---|---|---|---|
+| Off (no endpoint) | 27.38 ms | 34.53 ms | 69.05 ms |
+| On, viewer up | 27.77 ms | 36.26 ms | 68.78 ms |
+| On, viewer down | 27.66 ms | 34.60 ms | 69.67 ms |
 
-A call takes about 28.37 ms at the median, most of it
+Added compared with "off", with 95% bootstrap intervals (an interval
+that includes zero is no detectable difference):
+
+| Tracing | at p50 | at p95 | at p99 |
+|---|---|---|---|
+| On, viewer up | +0.39 ms (+0.29 to +0.50) | +1.72 ms (-1.23 to +4.62) | -0.27 ms (-13.29 to +11.83) |
+| On, viewer down | +0.28 ms (+0.18 to +0.40) | +0.07 ms (-2.19 to +3.46) | +0.62 ms (-14.29 to +9.19) |
+
+A call takes about 27.38 ms at the median, most of it
 database work (authentication, the rate-limit counter, the cost check,
-the query and the audit write). That varies by far more than the tracing
-work above, so the difference between modes here is noise unless its
-interval excludes zero. The interval is a bootstrap over the medians.
+the query and the audit write).
+
+## The tail, call by call
+
+With tracing on, the batch processor's thread sends spans every few
+seconds, and in CPython it competes with the server's thread for the
+interpreter lock while it serialises and sends them. Each timed call is
+marked if an export ran at any point during it. "Slow" means slower than
+the untraced p95 (34.53 ms):
+
+| Tracing | Exports | Calls during an export | Slow, during an export | Slow, otherwise |
+|---|---|---|---|---|
+| On, viewer up | 53 | 24 of 1500 | 100.0% | 4.3% |
+| On, viewer down | 30 | 884 of 1500 | 5.8% | 4.2% |
+
+If exports caused the slow tail, the slow share during an export would be
+well above the share otherwise. (With the viewer down, an "export" is a
+failed send attempt.)
 
 Per process, in the order run (a round's three modes ran back to back,
 so drift shows up as whole rounds moving together):
 
 | Round | Tracing | Call p50 | Span tree p50 |
 |---|---|---|---|
-| 1 | Off (no endpoint) | 27.33 ms | 27.0 µs |
-| 1 | On, viewer up | 27.19 ms | 109.9 µs |
-| 1 | On, viewer down | 27.05 ms | 112.2 µs |
-| 2 | On, viewer up | 27.61 ms | 111.2 µs |
-| 2 | On, viewer down | 30.12 ms | 112.0 µs |
-| 2 | Off (no endpoint) | 28.35 ms | 27.7 µs |
-| 3 | On, viewer down | 30.43 ms | 111.4 µs |
-| 3 | Off (no endpoint) | 30.22 ms | 27.3 µs |
-| 3 | On, viewer up | 31.54 ms | 117.1 µs |
+| 1 | Off (no endpoint) | 27.51 ms | 31.4 µs |
+| 1 | On, viewer up | 27.78 ms | 111.2 µs |
+| 1 | On, viewer down | 27.60 ms | 111.8 µs |
+| 2 | On, viewer up | 27.71 ms | 110.6 µs |
+| 2 | On, viewer down | 27.76 ms | 113.3 µs |
+| 2 | Off (no endpoint) | 27.38 ms | 31.0 µs |
+| 3 | On, viewer down | 27.61 ms | 110.9 µs |
+| 3 | Off (no endpoint) | 27.24 ms | 29.8 µs |
+| 3 | On, viewer up | 27.82 ms | 110.5 µs |
 
 ## Limits
 
@@ -68,6 +91,6 @@ so drift shows up as whole rounds moving together):
   no export connection.
 
 Environment: Darwin arm64 (8 CPUs; the 1-minute load
-average stayed at or below 6.5), Python 3.12.15, mcp 2.3.0,
+average stayed at or below 4.5), Python 3.12.15, mcp 2.3.0,
 opentelemetry-sdk 1.45.1, MCP-backbone
 `5f38bd246ee1`, local Postgres in Docker (MCP-backbone's test database).

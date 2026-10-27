@@ -38,6 +38,7 @@ import urllib.request
 from datetime import UTC, datetime
 from importlib.metadata import version
 from pathlib import Path
+from typing import Any
 
 from backbone import seeded, use_test_database
 
@@ -56,17 +57,22 @@ OUT = Path(__file__).resolve().parent.parent / "docs" / "mcp-backbone-overhead"
 
 async def measure(mode: str, calls: int, warmup: int) -> dict[str, object]:
     """One mode, in this process: time `calls` run_query calls after
-    `warmup` untimed ones, then time the tracer's shutdown."""
+    `warmup` untimed ones, then time the tracer's shutdown. With tracing
+    on, it also records when the exporter's background thread was busy
+    sending, and marks each call that overlapped a send, to see whether
+    the slow calls are the ones that ran while an export was going on."""
     from app.mcp.server import mcp
     from app.tracing import configure_tracing, shutdown_tracing
     from mcp.client.session import ClientSession
     from mcp.shared.memory import create_client_server_memory_streams
 
+    exports = _record_exports()
     provider = configure_tracing()
     assert (provider is None) == (mode == "off"), f"tracing set up wrongly for mode {mode}"
     api_key = os.environ["OVERHEAD_API_KEY"]
 
     samples: list[float] = []
+    windows: list[tuple[int, int]] = []
     async with create_client_server_memory_streams() as (client_streams, server_streams):
         lowlevel = mcp._lowlevel_server  # pyright: ignore[reportPrivateUsage]
         server_task = asyncio.ensure_future(
@@ -88,6 +94,7 @@ async def measure(mode: str, calls: int, warmup: int) -> dict[str, object]:
                         sys.exit(f"call {i} in mode {mode}: {status}")
                     if i >= warmup:
                         samples.append(elapsed_us)
+                        windows.append((started, started + int(elapsed_us * 1000)))
         finally:
             server_task.cancel()
 
@@ -97,7 +104,38 @@ async def measure(mode: str, calls: int, warmup: int) -> dict[str, object]:
     if provider is not None:
         shutdown_tracing(provider)
     shutdown_ms = (time.perf_counter_ns() - started) / 1e6
-    return {"mode": mode, "samples_us": samples, "tree_us": tree_us, "shutdown_ms": shutdown_ms}
+    return {
+        "mode": mode,
+        "samples_us": samples,
+        "during_export": _overlaps(windows, exports),
+        "exports": len(exports),
+        "tree_us": tree_us,
+        "shutdown_ms": shutdown_ms,
+    }
+
+
+def _record_exports() -> list[tuple[int, int]]:
+    """Wraps the OTLP exporter's export() to log when each send ran (on
+    the batch processor's thread). Only the measurement does this."""
+    from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+
+    sends: list[tuple[int, int]] = []
+    original = OTLPSpanExporter.export
+
+    def timed(self: OTLPSpanExporter, spans: Any) -> Any:
+        started = time.perf_counter_ns()
+        try:
+            return original(self, spans)
+        finally:
+            sends.append((started, time.perf_counter_ns()))
+
+    OTLPSpanExporter.export = timed  # type: ignore[method-assign]
+    return sends
+
+
+def _overlaps(windows: list[tuple[int, int]], sends: list[tuple[int, int]]) -> list[bool]:
+    """For each call's (start, end), whether any export ran during it."""
+    return [any(s < end and e > start for s, e in sends) for start, end in windows]
 
 
 def _time_span_trees(n: int) -> list[float]:
@@ -143,10 +181,10 @@ def _percentile(xs: list[float], p: float) -> float:
     return ordered[min(len(ordered) - 1, round(p / 100 * (len(ordered) - 1)))]
 
 
-def _median_diff_ci(a: list[float], b: list[float], rng: random.Random) -> tuple[float, float]:
-    """95% bootstrap interval for median(b) - median(a)."""
+def _diff_ci(a: list[float], b: list[float], p: float, rng: random.Random) -> tuple[float, float]:
+    """95% bootstrap interval for percentile p of b minus that of a."""
     diffs = sorted(
-        statistics.median(rng.choices(b, k=len(b))) - statistics.median(rng.choices(a, k=len(a)))
+        _percentile(rng.choices(b, k=len(b)), p) - _percentile(rng.choices(a, k=len(a)), p)
         for _ in range(2000)
     )
     return diffs[50], diffs[1949]
@@ -166,6 +204,8 @@ async def run(checkout: Path, calls: int, warmup: int, rounds: int) -> None:
     if (load := os.getloadavg()[0]) > CPUS / 2:
         sys.exit(f"the machine is busy (load {load:.1f} on {CPUS} CPUs): rerun when it's idle")
     samples: dict[str, list[float]] = {m: [] for m in MODES}
+    during: dict[str, list[bool]] = {m: [] for m in MODES}
+    exports: dict[str, int] = {m: 0 for m in MODES}
     trees: dict[str, list[float]] = {m: [] for m in MODES}
     shutdowns: dict[str, list[float]] = {m: [] for m in MODES}
     per_round: list[dict[str, object]] = []
@@ -187,6 +227,8 @@ async def run(checkout: Path, calls: int, warmup: int, rounds: int) -> None:
                 result = json.loads(out.stdout.strip().splitlines()[-1])
                 samples[mode] += result["samples_us"]
                 trees[mode] += result["tree_us"]
+                during[mode] += result["during_export"]
+                exports[mode] += result["exports"]
                 shutdowns[mode].append(result["shutdown_ms"])
                 loads.append(os.getloadavg()[0])
                 per_round.append(
@@ -223,9 +265,25 @@ async def run(checkout: Path, calls: int, warmup: int, rounds: int) -> None:
             "span_tree_p95_us": _percentile(trees[mode], 95),
         }
         if mode != "off":
-            lo, hi = _median_diff_ci(samples["off"], xs, rng)
-            stats[mode]["p50_added_us"] = stats[mode]["p50_us"] - stats["off"]["p50_us"]
-            stats[mode]["p50_added_ci95_us"] = [lo, hi]  # type: ignore[assignment]
+            for p in (50, 95, 99):
+                lo, hi = _diff_ci(samples["off"], xs, p, rng)
+                added = stats[mode][f"p{p}_us"] - stats["off"][f"p{p}_us"]
+                stats[mode][f"p{p}_added_us"] = added
+                stats[mode][f"p{p}_added_ci95_us"] = [lo, hi]  # type: ignore[assignment]
+            # The tail, call by call: are the calls slower than "off"'s p95
+            # the ones that ran while an export was being sent?
+            slow = stats["off"]["p95_us"]
+            flagged = list(zip(xs, during[mode], strict=True))
+            with_export = [x for x, d in flagged if d]
+            without = [x for x, d in flagged if not d]
+            stats[mode]["exports"] = exports[mode]
+            stats[mode]["calls_during_export"] = len(with_export)
+            stats[mode]["slow_share_during_export"] = (
+                sum(x > slow for x in with_export) / len(with_export) if with_export else 0.0
+            )
+            stats[mode]["slow_share_otherwise"] = (
+                sum(x > slow for x in without) / len(without) if without else 0.0
+            )
     environment = {
         "date": datetime.now(UTC).strftime("%Y-%m-%d"),
         "machine": f"{platform.system()} {platform.machine()}",
@@ -267,16 +325,21 @@ def _report(
         return f"{us / 1000:.2f} ms"
 
     labels = {"off": "Off (no endpoint)", "on": "On, viewer up", "dead": "On, viewer down"}
-    calls, trees = [], []
+
+    def added(s: dict[str, float], p: int) -> str:
+        lo, hi = s[f"p{p}_added_ci95_us"]  # type: ignore[misc]
+        return f"{s[f'p{p}_added_us'] / 1000:+.2f} ms ({lo / 1000:+.2f} to {hi / 1000:+.2f})"
+
+    calls, added_rows, tails, trees = [], [], [], []
     for mode, label in labels.items():
         s = stats[mode]
-        added = "–"
+        calls.append(f"| {label} | {ms(s['p50_us'])} | {ms(s['p95_us'])} | {ms(s['p99_us'])} |")
         if mode != "off":
-            lo, hi = s["p50_added_ci95_us"]  # type: ignore[misc]
-            added = f"{s['p50_added_us'] / 1000:+.2f} ms ({lo / 1000:+.2f} to {hi / 1000:+.2f})"
-        calls.append(
-            f"| {label} | {ms(s['p50_us'])} | {ms(s['p95_us'])} | {ms(s['p99_us'])} | {added} |"
-        )
+            added_rows.append(f"| {label} | {added(s, 50)} | {added(s, 95)} | {added(s, 99)} |")
+            tails.append(
+                f"| {label} | {s['exports']:.0f} | {s['calls_during_export']:.0f} of {s['calls']:.0f} "
+                f"| {s['slow_share_during_export']:.1%} | {s['slow_share_otherwise']:.1%} |"
+            )
         trees.append(
             f"| {label} | {s['span_tree_p50_us']:.1f} µs | {s['span_tree_p95_us']:.1f} µs "
             f"| {s['shutdown_ms_max']:.0f} ms |"
@@ -318,15 +381,36 @@ its 2 s cap, and the spans still queued are lost.
 process per mode and round, {env["rounds"]} rounds in rotating order,
 after {env["warmup_per_process"]} untimed calls per process:
 
-| Tracing | p50 | p95 | p99 | Added at p50 (95% CI) |
-|---|---|---|---|---|
+| Tracing | p50 | p95 | p99 |
+|---|---|---|---|
 {chr(10).join(calls)}
+
+Added compared with "off", with 95% bootstrap intervals (an interval
+that includes zero is no detectable difference):
+
+| Tracing | at p50 | at p95 | at p99 |
+|---|---|---|---|
+{chr(10).join(added_rows)}
 
 A call takes about {ms(off["p50_us"])} at the median, most of it
 database work (authentication, the rate-limit counter, the cost check,
-the query and the audit write). That varies by far more than the tracing
-work above, so the difference between modes here is noise unless its
-interval excludes zero. The interval is a bootstrap over the medians.
+the query and the audit write).
+
+## The tail, call by call
+
+With tracing on, the batch processor's thread sends spans every few
+seconds, and in CPython it competes with the server's thread for the
+interpreter lock while it serialises and sends them. Each timed call is
+marked if an export ran at any point during it. "Slow" means slower than
+the untraced p95 ({ms(off["p95_us"])}):
+
+| Tracing | Exports | Calls during an export | Slow, during an export | Slow, otherwise |
+|---|---|---|---|---|
+{chr(10).join(tails)}
+
+If exports caused the slow tail, the slow share during an export would be
+well above the share otherwise. (With the viewer down, an "export" is a
+failed send attempt.)
 
 Per process, in the order run (a round's three modes ran back to back,
 so drift shows up as whole rounds moving together):
