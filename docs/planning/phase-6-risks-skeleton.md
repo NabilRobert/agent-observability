@@ -96,3 +96,12 @@ the order 2 → 4 → 1 → 3. All four passed. The scripts are in
 | 4 | **Pass.** Spans built as the SDK's public `ReadableSpan`, with fixed trace and span IDs, a parent and timestamps 0, 20 and 40 days old, came back from Jaeger's query API identical: IDs, parents, start and end to the nanosecond | ADR-006 stands: the replay builds spans directly |
 | 1 | **Pass.** The 20- and 40-day-old spans were found by ID and by a time-range search, before and after a container restart: Badger's retention counts from when a span is written, not from its start time. Jaeger used **15 MiB** of memory idle, against the 256 MiB limit. Badger preallocates a 2.3 GB value log, but it is sparse: 44 KB actually used | Retention of 30 days is safe for the replay. Disk use is reported as real use, not apparent size. Jaeger 2.22 serves only its v3 query API (`/api/v3/...`); the old `/api/traces` is gone, so the checks use v3 |
 | 3 | **Pass, with a setting.** A closed-port exporter added nothing measurable per call (p50 about 45 µs for five spans, with or without an exporter). But `shutdown()` waited **6.5 s** with the exporter's default timeout, and **1.1 s** with a 2 s timeout | MCP-backbone sets a 2 s exporter timeout by default, so a dead viewer can't hold up a restart |
+
+**As built (slices 1–3):** after the full Pitstop replay (653 spans, sent
+twice) plus the MCP-backbone tests and demo, Jaeger used **95 MiB**
+against its 256 MiB limit, and **4.2 MB** of real disk. Replaying twice
+stored no duplicates: Jaeger keys spans by ID, so the replay is
+idempotent. A mutation check in slice 2 found a real bug: the exporter
+read its endpoint from the process environment, not the one passed in,
+so a test's "dead" viewer was in fact the live local one.
+

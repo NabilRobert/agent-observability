@@ -53,16 +53,18 @@ Under the SDK's `tools/call <tool>` server span. Content capture:
 
 | Span | Kind | Attributes (beyond the table above) |
 |---|---|---|
-| `authenticate` | INTERNAL | `error.type` on refusal (`unauthenticated`, `not_permitted`) |
+| `authenticate` | INTERNAL | `error.type` on refusal: the exception's class (`AuthenticationError`, `ToolNotPermitted`) |
 | `rate_limit` | INTERNAL | `error.type=rate_limited` when refused |
 | `validate` | INTERNAL | `error.type=rejected_by_validation` when refused |
-| `cost_check` | CLIENT | `db.operation.name=EXPLAIN`, `mcp_backbone.cost.estimate`, `mcp_backbone.cost.threshold`; `error.type=rejected_by_cost` when refused |
+| `cost_check` | CLIENT | `db.operation.name=EXPLAIN`, `mcp_backbone.cost.estimate`, `mcp_backbone.cost.threshold`; `error.type=rejected_by_cost` when refused, or the exception's class when `EXPLAIN` itself fails |
 | `execute` | CLIENT | `db.operation.name=SELECT`, `db.response.returned_rows`, `mcp_backbone.result.truncated`, `mcp_backbone.execute.attempts`; `error.type` = `timed_out` or `errored` |
-| `audit` | CLIENT | `db.operation.name=INSERT`, `db.collection.name=query_executions` |
+| `audit` | CLIENT | `db.operation.name=INSERT`, `db.collection.name=query_executions`; the exception's class if the write fails (the call then fails too) |
 
 On the `tools/call` span: `mcp_backbone.query.status` (`succeeded`,
 `rejected`, `errored`, `timed_out`). With capture on: `db.query.text` on
-`execute`, and the rejection reason as the status message.
+`execute`, and the rejection reason or exception message as the status
+message. The SDK's own exception recording is off on these spans: it
+would copy the message, which can quote the query, into the span.
 
 ## Pitstop (replayed)
 
