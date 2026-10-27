@@ -28,8 +28,9 @@ extend-select = ["I", "B", "UP"]
 
 [tool.pyright]
 typeCheckingMode = "strict"
-# demos/ runs in the environment of the project it demonstrates.
-exclude = ["demos", ".venv"]
+# demos/ runs in the environment of the project it demonstrates;
+# spikes/ are the throwaway Phase 6 scripts, kept as a record.
+exclude = ["demos", "spikes", ".venv"]
 venvPath = "."
 venv = ".venv"
 
