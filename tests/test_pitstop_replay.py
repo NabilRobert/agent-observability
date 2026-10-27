@@ -63,6 +63,10 @@ def test_each_run_is_one_trace_with_the_recorded_tree(steps: list[Step]) -> None
             parent = None if step.parent_id is None else span_id_for(step.parent_id)
             assert _ids(span)[1:] == (span_id_for(step.id), parent)
     assert trace_id_for(7) != trace_id_for(8)
+    # Pinned, so a replay next month (or in another process) lands on the
+    # same trace and span IDs as this one.
+    assert f"{trace_id_for(7):032x}" == "7b72089bbaa2b8d832721d1589da2433"
+    assert f"{span_id_for(101):016x}" == "4317cf9983f800a3"
     # Deterministic: the same snapshot always gives the same IDs.
     assert [_ids(span_for(s, resource=RESOURCE)) for s in steps] == [
         _ids(span_for(s, resource=RESOURCE)) for s in load_steps(FIXTURE)
