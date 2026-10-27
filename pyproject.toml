@@ -28,6 +28,8 @@ extend-select = ["I", "B", "UP"]
 
 [tool.pyright]
 typeCheckingMode = "strict"
+# demos/ runs in the environment of the project it demonstrates.
+exclude = ["demos", ".venv"]
 venvPath = "."
 venv = ".venv"
 
