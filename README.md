@@ -40,9 +40,9 @@ and cost.
   refused, errored, a failed audit write) and finds it in no span. The
   replay never reads Pitstop's prompts and responses.
 - **Tracing can't hurt the traced system.** With the viewer down, tool
-  calls still succeed, and a shutdown waits about a second (a 2 s export
-  timeout) instead of the exporter's default 6.5 s.
-  Without an endpoint configured, nothing is exported at all.
+  calls still succeed, and a shutdown gives up flushing after 2 s,
+  however many spans are queued (the SDK alone took 5.3 s with a full
+  queue). Without an endpoint configured, nothing is exported at all.
 - **The replay is faithful.** Every recorded step appears once, with the
   same parent, start time (to the microsecond) and duration; the
   model-call costs in each run add up to its recorded total (26 runs had

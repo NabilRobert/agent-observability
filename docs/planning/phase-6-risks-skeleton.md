@@ -105,3 +105,9 @@ idempotent. A mutation check in slice 2 found a real bug: the exporter
 read its endpoint from the process environment, not the one passed in,
 so a test's "dead" viewer was in fact the live local one.
 
+**As built (slice 6):** Spike 3's conclusion was incomplete. It queued
+one batch; a shutdown flushes every queued batch, each with its own
+export timeout, so a full queue (four batches) and a dead viewer held
+the shutdown for 5.3 s. MCP-backbone now caps the whole shutdown at 2 s
+(`shutdown_tracing`), with a test that queues four batches.
+
