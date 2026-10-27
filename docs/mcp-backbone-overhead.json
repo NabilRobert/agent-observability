@@ -1,0 +1,115 @@
+{
+  "environment": {
+    "date": "2026-10-27",
+    "machine": "Darwin arm64",
+    "python": "3.12.15",
+    "mcp": "2.3.0",
+    "opentelemetry-sdk": "1.45.1",
+    "mcp_backbone_version": "5f38bd246ee1",
+    "database": "local Postgres in Docker (MCP-backbone's test database)",
+    "calls_per_mode": 1500,
+    "warmup_per_process": 50,
+    "span_trees_per_mode": 6000,
+    "rounds": 3,
+    "cpus": 8,
+    "max_load_1min": 6.53076171875
+  },
+  "results": {
+    "off": {
+      "calls": 1500,
+      "p50_us": 28366.1045,
+      "p95_us": 45957.166,
+      "p99_us": 91222.208,
+      "mean_us": 32148.81831866667,
+      "shutdown_ms_max": 0.008875,
+      "span_tree_p50_us": 27.375,
+      "span_tree_p95_us": 32.083
+    },
+    "on": {
+      "calls": 1500,
+      "p50_us": 28093.5205,
+      "p95_us": 60314.541,
+      "p99_us": 126399.25,
+      "mean_us": 34044.59846,
+      "shutdown_ms_max": 192.973,
+      "span_tree_p50_us": 112.0,
+      "span_tree_p95_us": 146.375,
+      "p50_added_us": -272.58400000000256,
+      "p50_added_ci95_us": [
+        -580.8539999999994,
+        53.37550000000192
+      ]
+    },
+    "dead": {
+      "calls": 1500,
+      "p50_us": 28885.1875,
+      "p95_us": 53928.042,
+      "p99_us": 159766.667,
+      "mean_us": 34487.92079333333,
+      "shutdown_ms_max": 2009.669584,
+      "span_tree_p50_us": 111.792,
+      "span_tree_p95_us": 147.083,
+      "p50_added_us": 519.0829999999987,
+      "p50_added_ci95_us": [
+        151.8739999999998,
+        910.1244999999981
+      ]
+    }
+  },
+  "per_round": [
+    {
+      "round": 1,
+      "mode": "off",
+      "call_p50_us": 27330.4165,
+      "span_tree_p50_us": 26.959
+    },
+    {
+      "round": 1,
+      "mode": "on",
+      "call_p50_us": 27191.4375,
+      "span_tree_p50_us": 109.917
+    },
+    {
+      "round": 1,
+      "mode": "dead",
+      "call_p50_us": 27046.625,
+      "span_tree_p50_us": 112.209
+    },
+    {
+      "round": 2,
+      "mode": "on",
+      "call_p50_us": 27606.396,
+      "span_tree_p50_us": 111.25
+    },
+    {
+      "round": 2,
+      "mode": "dead",
+      "call_p50_us": 30124.25,
+      "span_tree_p50_us": 112.042
+    },
+    {
+      "round": 2,
+      "mode": "off",
+      "call_p50_us": 28352.167,
+      "span_tree_p50_us": 27.709
+    },
+    {
+      "round": 3,
+      "mode": "dead",
+      "call_p50_us": 30431.9795,
+      "span_tree_p50_us": 111.417
+    },
+    {
+      "round": 3,
+      "mode": "off",
+      "call_p50_us": 30217.854,
+      "span_tree_p50_us": 27.291
+    },
+    {
+      "round": 3,
+      "mode": "on",
+      "call_p50_us": 31542.8535,
+      "span_tree_p50_us": 117.084
+    }
+  ]
+}

@@ -47,6 +47,13 @@ and cost.
   same parent, start time (to the microsecond) and duration; the
   model-call costs in each run add up to its recorded total (26 runs had
   one). `0 problems` on all 62 runs, checked against the viewer's API.
+- **Cheap.** Tracing one MCP-backbone tool call costs about **85 µs** of
+  CPU (112 µs with tracing on, 27 µs with it off), steady across nine
+  processes: **0.3%** of a 28 ms call. Over 1,500 whole calls per mode,
+  tracing with the viewer up showed no detectable difference (−0.27 ms,
+  95% CI −0.58 to +0.05). With the viewer down it measured +0.52 ms
+  (+0.15 to +0.91), within the drift between rounds as the machine's load
+  rose. Details: [`docs/mcp-backbone-overhead.md`](docs/mcp-backbone-overhead.md).
 - **Small.** Jaeger runs in 256 MB; it used 95 MiB with everything above
   loaded.
 - Every new test was mutation-checked: 10 mutations in MCP-backbone and 10
