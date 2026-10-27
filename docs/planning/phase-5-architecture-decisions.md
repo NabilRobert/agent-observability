@@ -155,6 +155,11 @@ test.
 - *Auto-instrumentation with the statement text filtered out:* it works,
   but the stage spans would still be needed, so it adds noise and a
   dependency for nothing.
+- *Replaying the audit table (`query_executions`) instead, as first
+  sketched in the project handover:* one row per call, with no time per
+  stage and no link to the agent that asked, so it can't join an
+  end-to-end trace. The audit table stays the record (Phase 3); the spans
+  are the timed view of the same calls.
 
 **Consequences:**
 - MCP-backbone takes two new dependencies (the SDK and the OTLP/HTTP
