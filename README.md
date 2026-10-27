@@ -71,7 +71,8 @@ docker compose -f viewer/compose.yaml up -d
 uv run python viewer/smoke.py
 ```
 
-The UI is at http://127.0.0.1:16686.
+The UI is at http://127.0.0.1:16686. On the shared server, follow
+[`viewer/RUNBOOK.md`](viewer/RUNBOOK.md).
 
 Replay Pitstop's traces (needs the private backup):
 

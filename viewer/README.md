@@ -12,6 +12,9 @@ docker compose -f viewer/compose.yaml up -d
 uv run python viewer/smoke.py
 ```
 
+(`viewer/smoke.sh` does the same with only `curl`, for a server without
+`uv`.)
+
 - UI: http://127.0.0.1:16686
 - OTLP/HTTP: http://127.0.0.1:4318 (set `OTEL_EXPORTER_OTLP_ENDPOINT` to
   this in a source)
@@ -21,4 +24,5 @@ Limits: 256 MB of memory and half a CPU. Measured idle: 15 MiB
 (Phase 6, Spike 1). Badger preallocates a sparse 2.3 GB value log; real
 disk use starts at a few KB.
 
-On a server, the UI is reached through an SSH tunnel to port 16686.
+On the shared server, the UI is reached only through an SSH tunnel: see
+[RUNBOOK.md](RUNBOOK.md) for installing, feeding, operating and removing it.
