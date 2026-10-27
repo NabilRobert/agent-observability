@@ -1,0 +1,231 @@
+[
+ {
+  "id": 101,
+  "run_id": 7,
+  "parent_id": null,
+  "seq": 1,
+  "kind": "run",
+  "name": "daily run",
+  "status": "ok",
+  "started_at": "2026-09-30T00:00:00.000100+00:00",
+  "ended_at": "2026-09-30T00:00:20.000000+00:00",
+  "model": null,
+  "tokens_in": null,
+  "tokens_out": null,
+  "cost_usd": "0.003500",
+  "summary": null,
+  "meta": {
+   "run_type": "daily"
+  },
+  "error_message": null
+ },
+ {
+  "id": 102,
+  "run_id": 7,
+  "parent_id": 101,
+  "seq": 2,
+  "kind": "context",
+  "name": "Build analysis context",
+  "status": "ok",
+  "started_at": "2026-09-30T00:00:00.100000+00:00",
+  "ended_at": "2026-09-30T00:00:00.600000+00:00",
+  "model": null,
+  "tokens_in": null,
+  "tokens_out": null,
+  "cost_usd": null,
+  "summary": "context zzcontent9b1",
+  "meta": {
+   "rows": {
+    "a": 1
+   },
+   "chars": 1200,
+   "days": 7,
+   "critic_only": false,
+   "data_source": "src zzcontent9b1"
+  },
+  "error_message": null
+ },
+ {
+  "id": 103,
+  "run_id": 7,
+  "parent_id": 101,
+  "seq": 3,
+  "kind": "agent",
+  "name": "Anna (analysis)",
+  "status": "ok",
+  "started_at": "2026-09-30T00:00:01.000000+00:00",
+  "ended_at": "2026-09-30T00:00:15.000000+00:00",
+  "model": null,
+  "tokens_in": null,
+  "tokens_out": null,
+  "cost_usd": null,
+  "summary": null,
+  "meta": {
+   "agent_type": "analysis",
+   "final_status": "approved",
+   "revisions": 0,
+   "period": "zzcontent9b1"
+  },
+  "error_message": null
+ },
+ {
+  "id": 104,
+  "run_id": 7,
+  "parent_id": 103,
+  "seq": 4,
+  "kind": "llm_call",
+  "name": "gpt-5-mini",
+  "status": "ok",
+  "started_at": "2026-09-30T00:00:01.100000+00:00",
+  "ended_at": "2026-09-30T00:00:08.250000+00:00",
+  "model": "gpt-5-mini",
+  "tokens_in": 4000,
+  "tokens_out": 900,
+  "cost_usd": "0.002000",
+  "summary": "response zzcontent9b1",
+  "meta": {
+   "attempt": 1,
+   "cached_tokens": 1024,
+   "finish_reason": "stop",
+   "json": true,
+   "max_completion_tokens": 8000,
+   "reasoning_effort": "low",
+   "reasoning_tokens": 320
+  },
+  "error_message": null
+ },
+ {
+  "id": 105,
+  "run_id": 7,
+  "parent_id": 103,
+  "seq": 5,
+  "kind": "critic_review",
+  "name": "Ciri reviews analysis (pass 1)",
+  "status": "ok",
+  "started_at": "2026-09-30T00:00:08.300000+00:00",
+  "ended_at": "2026-09-30T00:00:14.000000+00:00",
+  "model": null,
+  "tokens_in": null,
+  "tokens_out": null,
+  "cost_usd": null,
+  "summary": null,
+  "meta": {
+   "pass": 1,
+   "agent_type": "analysis",
+   "grade": "B",
+   "has_issues": true,
+   "feedback": "feedback zzcontent9b1",
+   "issues": [
+    "zzcontent9b1"
+   ]
+  },
+  "error_message": null
+ },
+ {
+  "id": 106,
+  "run_id": 7,
+  "parent_id": 105,
+  "seq": 6,
+  "kind": "llm_call",
+  "name": "gpt-5.4",
+  "status": "ok",
+  "started_at": "2026-09-30T00:00:08.400000+00:00",
+  "ended_at": "2026-09-30T00:00:13.900000+00:00",
+  "model": "gpt-5.4",
+  "tokens_in": 5000,
+  "tokens_out": 300,
+  "cost_usd": "0.001500",
+  "summary": null,
+  "meta": {
+   "attempt": 1,
+   "cached_tokens": 0,
+   "finish_reason": "stop",
+   "json": false,
+   "max_completion_tokens": 4000,
+   "reasoning_effort": null,
+   "reasoning_tokens": 0
+  },
+  "error_message": null
+ },
+ {
+  "id": 107,
+  "run_id": 7,
+  "parent_id": 103,
+  "seq": 7,
+  "kind": "decision",
+  "name": "Approve",
+  "status": "error",
+  "started_at": "2026-09-30T00:00:14.100000+00:00",
+  "ended_at": "2026-09-30T00:00:14.100500+00:00",
+  "model": null,
+  "tokens_in": null,
+  "tokens_out": null,
+  "cost_usd": null,
+  "summary": null,
+  "meta": {
+   "outcome": "approved",
+   "reason": "zzcontent9b1",
+   "review": 1
+  },
+  "error_message": "bad zzcontent9b1"
+ },
+ {
+  "id": 108,
+  "run_id": 7,
+  "parent_id": 101,
+  "seq": 8,
+  "kind": "email",
+  "name": "Send daily email",
+  "status": "ok",
+  "started_at": "2026-09-30T00:00:19.500000+00:00",
+  "ended_at": "2026-09-30T00:00:20.480000+00:00",
+  "model": null,
+  "tokens_in": null,
+  "tokens_out": null,
+  "cost_usd": null,
+  "summary": null,
+  "meta": {
+   "run_type": "daily",
+   "subject": "Daily zzcontent9b1"
+  },
+  "error_message": null
+ },
+ {
+  "id": 201,
+  "run_id": 8,
+  "parent_id": null,
+  "seq": 1,
+  "kind": "run",
+  "name": "backup run",
+  "status": "ok",
+  "started_at": "2026-10-01T03:00:00.000000+00:00",
+  "ended_at": "2026-10-01T03:00:02.500000+00:00",
+  "model": null,
+  "tokens_in": null,
+  "tokens_out": null,
+  "cost_usd": null,
+  "summary": null,
+  "meta": {
+   "run_type": "backup"
+  },
+  "error_message": null
+ },
+ {
+  "id": 202,
+  "run_id": 8,
+  "parent_id": 201,
+  "seq": 2,
+  "kind": "decision",
+  "name": "Skipped step",
+  "status": "skipped",
+  "started_at": "2026-10-01T03:00:01.000000+00:00",
+  "ended_at": null,
+  "model": null,
+  "tokens_in": null,
+  "tokens_out": null,
+  "cost_usd": null,
+  "summary": null,
+  "meta": null,
+  "error_message": null
+ }
+]
