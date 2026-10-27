@@ -23,7 +23,9 @@ def ns(dt: datetime) -> int:
 
 
 def make(trace_id: int, span_id: int, parent: int | None, name: str, start: datetime, ms: int):
-    ctx = SpanContext(trace_id, span_id, is_remote=False, trace_flags=TraceFlags(TraceFlags.SAMPLED))
+    ctx = SpanContext(
+        trace_id, span_id, is_remote=False, trace_flags=TraceFlags(TraceFlags.SAMPLED)
+    )
     parent_ctx = (
         SpanContext(trace_id, parent, is_remote=False, trace_flags=TraceFlags(TraceFlags.SAMPLED))
         if parent
@@ -49,7 +51,11 @@ def main() -> int:
         t0 = now - timedelta(days=days)
         tid = 0xABC0000000000000000000000000000 + i
         spans.append(make(tid, 0x1000 + i, None, f"root {label}", t0, 500))
-        spans.append(make(tid, 0x2000 + i, 0x1000 + i, f"child {label}", t0 + timedelta(milliseconds=100), 250))
+        spans.append(
+            make(
+                tid, 0x2000 + i, 0x1000 + i, f"child {label}", t0 + timedelta(milliseconds=100), 250
+            )
+        )
     result = OTLPSpanExporter(endpoint="http://127.0.0.1:4318/v1/traces").export(spans)
     print("export:", result)
     if result is not SpanExportResult.SUCCESS:
@@ -66,13 +72,25 @@ def main() -> int:
             ok = False
             continue
         got = [
-            (s["name"], s["spanId"], s.get("parentSpanId", ""), s["startTimeUnixNano"], s["endTimeUnixNano"])
+            (
+                s["name"],
+                s["spanId"],
+                s.get("parentSpanId", ""),
+                s["startTimeUnixNano"],
+                s["endTimeUnixNano"],
+            )
             for rs in body["result"]["resourceSpans"]
             for ss in rs["scopeSpans"]
             for s in ss["spans"]
         ]
         want = sorted(
-            (s.name, f"{s.context.span_id:016x}", f"{s.parent.span_id:016x}" if s.parent else "", str(s.start_time), str(s.end_time))
+            (
+                s.name,
+                f"{s.context.span_id:016x}",
+                f"{s.parent.span_id:016x}" if s.parent else "",
+                str(s.start_time),
+                str(s.end_time),
+            )
             for s in spans
             if s.context.trace_id == int(tid, 16)
         )
@@ -92,7 +110,11 @@ def main() -> int:
         )
         try:
             with urllib.request.urlopen(url) as r:
-                n = sum(len(ss["spans"]) for rs in json.load(r)["result"]["resourceSpans"] for ss in rs["scopeSpans"])
+                n = sum(
+                    len(ss["spans"])
+                    for rs in json.load(r)["result"]["resourceSpans"]
+                    for ss in rs["scopeSpans"]
+                )
         except Exception as exc:  # noqa: BLE001
             n = f"error {exc}"
         print(f"search {label}: {n} spans")

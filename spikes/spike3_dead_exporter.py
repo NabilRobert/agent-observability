@@ -13,7 +13,9 @@ def run(endpoint: str | None, timeout: float | None) -> None:
     provider = TracerProvider()
     if endpoint:
         kwargs = {"timeout": timeout} if timeout else {}
-        provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter(endpoint=endpoint, **kwargs)))
+        provider.add_span_processor(
+            BatchSpanProcessor(OTLPSpanExporter(endpoint=endpoint, **kwargs))
+        )
     tracer = provider.get_tracer("spike3")
     per_call = []
     for _ in range(50):
