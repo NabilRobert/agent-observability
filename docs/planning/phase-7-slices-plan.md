@@ -70,3 +70,9 @@ If time runs short, cut in this order:
 - a published fixture of replayed span data (no content), so others can
   load it;
 - the gateway's audit log as span events.
+- **Juku (Project 7) as a source.** It sends to this viewer under these
+  conventions: one trace per request (app → gateway → MCP server →
+  database) and one per weekly pipeline run, with the trace ID stored on
+  its own per-call records. Juku owns its metrics, dashboards and alerts;
+  all it needs from here is the viewer deployed on the server (slice 7)
+  before it launches.

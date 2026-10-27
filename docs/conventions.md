@@ -95,6 +95,9 @@ values and error messages; it never adds payloads.
 - Let the MCP SDK's own server and client spans stand; call the upstream
   from inside the gateway's handling span, so the SDK injects the context
   into the upstream request's `_meta`.
+- Pass the rest of `params._meta` through unchanged. The trace context is
+  only one of its keys: Juku (Project 7) puts a signed delegation token
+  there too, and both have to reach the MCP server intact.
 - Name its own steps as plain stages under the server span (for example
   `authorize`, `policy`, `detect`), with `error.type` for denials and
   blocks.
