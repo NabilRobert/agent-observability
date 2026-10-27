@@ -86,4 +86,13 @@ and its checks.
 
 ## Spike results
 
-*(Filled in as the spikes run.)*
+Run 2026-10-27 on Arthur's laptop (Apple silicon, Docker Desktop), in
+the order 2 → 4 → 1 → 3. All four passed. The scripts are in
+[`spikes/`](../../spikes/).
+
+| # | Result | Consequence for the build |
+|---|---|---|
+| 2 | **Pass.** With mcp 2.3.0 over in-memory streams: a span opened in a tool is a child of the SDK's `tools/call <tool>` server span, which is a child of the client's `MCP send tools/call <tool>` span (a remote parent, through `_meta`), which is a child of the caller's own span. One trace ID throughout. The client also issues a `tools/list` inside `call_tool`, which shows up in the same trace | ADR-003 and ADR-005 stand. MCP-backbone only installs a provider and opens its stage spans |
+| 4 | **Pass.** Spans built as the SDK's public `ReadableSpan`, with fixed trace and span IDs, a parent and timestamps 0, 20 and 40 days old, came back from Jaeger's query API identical: IDs, parents, start and end to the nanosecond | ADR-006 stands: the replay builds spans directly |
+| 1 | **Pass.** The 20- and 40-day-old spans were found by ID and by a time-range search, before and after a container restart: Badger's retention counts from when a span is written, not from its start time. Jaeger used **15 MiB** of memory idle, against the 256 MiB limit. Badger preallocates a 2.3 GB value log, but it is sparse: 44 KB actually used | Retention of 30 days is safe for the replay. Disk use is reported as real use, not apparent size. Jaeger 2.22 serves only its v3 query API (`/api/v3/...`); the old `/api/traces` is gone, so the checks use v3 |
+| 3 | **Pass, with a setting.** A closed-port exporter added nothing measurable per call (p50 about 45 µs for five spans, with or without an exporter). But `shutdown()` waited **6.5 s** with the exporter's default timeout, and **1.1 s** with a 2 s timeout | MCP-backbone sets a 2 s exporter timeout by default, so a dead viewer can't hold up a restart |
