@@ -42,7 +42,7 @@ def main() -> int:
             if names == ["smoke"]:
                 print(f"ok: trace {trace_id} stored and read back")
                 return 0
-        except urllib.error.URLError, KeyError:
+        except OSError, KeyError:  # URLError, a dropped connection while it starts
             pass
         time.sleep(0.5)
     print(f"failed: trace {trace_id} not readable from {QUERY}", file=sys.stderr)
