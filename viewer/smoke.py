@@ -8,7 +8,6 @@ import json
 import os
 import sys
 import time
-import urllib.error
 import urllib.request
 
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
