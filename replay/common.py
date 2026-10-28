@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 import urllib.error
+import urllib.parse
 import urllib.request
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -59,12 +60,18 @@ class StoredSpan:
     start: int
     end: int
     attributes: Mapping[str, Any]
+    service: str = ""
+    trace_id: int = 0
 
 
 def parse_otlp_json(body: Mapping[str, Any]) -> list[StoredSpan]:
     """The spans in a Jaeger v3 API trace response (OTLP JSON)."""
     out: list[StoredSpan] = []
     for rs in body["result"]["resourceSpans"]:
+        resource = {
+            a["key"]: _otlp_value(a["value"]) for a in rs.get("resource", {}).get("attributes", [])
+        }
+        service = str(resource.get("service.name", ""))
         for ss in rs["scopeSpans"]:
             for s in ss["spans"]:
                 parent = s.get("parentSpanId") or None
@@ -78,6 +85,8 @@ def parse_otlp_json(body: Mapping[str, Any]) -> list[StoredSpan]:
                         attributes={
                             a["key"]: _otlp_value(a["value"]) for a in s.get("attributes", [])
                         },
+                        service=service,
+                        trace_id=int(s["traceId"], 16) if s.get("traceId") else 0,
                     )
                 )
     return out
@@ -95,6 +104,25 @@ def _otlp_value(value: Mapping[str, Any]) -> Any:
 def fetch_trace(trace_id: int) -> list[StoredSpan]:
     try:
         with urllib.request.urlopen(f"{QUERY}/api/v3/traces/{trace_id:032x}", timeout=10) as r:
+            return parse_otlp_json(json.load(r))
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            return []
+        raise
+
+
+def query_traces(service: str, start: datetime, end: datetime, limit: int = 50) -> list[StoredSpan]:
+    """The spans of the traces `service` took part in between start and end."""
+    params = urllib.parse.urlencode(
+        {
+            "query.service_name": service,
+            "query.start_time_min": start.isoformat().replace("+00:00", "Z"),
+            "query.start_time_max": end.isoformat().replace("+00:00", "Z"),
+            "query.search_depth": str(limit),
+        }
+    )
+    try:
+        with urllib.request.urlopen(f"{QUERY}/api/v3/traces?{params}", timeout=10) as r:
             return parse_otlp_json(json.load(r))
     except urllib.error.HTTPError as exc:
         if exc.code == 404:

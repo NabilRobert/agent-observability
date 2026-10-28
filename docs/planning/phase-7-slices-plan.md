@@ -25,6 +25,23 @@ that fails changes the plan below, and the change is recorded.
 replayed with 0 problems on the fidelity, cost and token checks. 5(b)
 waits for the gateway's tracing (slice 4).
 
+**Progress (2026-10-29):** the end-to-end check (`e2e/check.py`) and a
+local runner (`demos/end_to_end.py`) are built. A stand-in scripted agent
+already runs agent -> gateway -> MCP-backbone -> Postgres in one unbroken
+trace: the gateway forwards `_meta`, so MCP-backbone's spans nest under
+the agent's. The check fails on the full path only because the gateway
+has no spans of its own yet. Requested from their sessions: the gateway's
+spans (slice 4), and the harness's tracer provider and scripted Pagila
+agent (slice 5b), which replaces the stand-in.
+
+**Slice 4 done (2026-10-29), on the gateway's branch:** with its tracing
+(`feat/otel-tracing`, `26d58b4`), the full path passes the end-to-end
+check: one trace, 37 spans from three services, every process stopped
+normally. The first try lost the gateway's last spans on SIGTERM: uvicorn
+re-raises the captured signal after a graceful shutdown, killing the
+process before the gateway's `finally` ran. The gateway now turns SIGTERM
+into an ordinary exit.
+
 **Order:** spikes → 0 → 1 → 2 → 3 → checkpoint → (4, by the gateway
 session) → 5 → 6 → 7. Slices 2 and 3 touch different repos and could run
 in parallel.

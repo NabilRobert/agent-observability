@@ -286,6 +286,18 @@ reuses what already exists and builds only the glue:
 SDK and OTLP/HTTP exporter, as MCP-backbone has), and the change lives in
 the harness's own repo, on a branch, per the rule.
 
+**Corrected (2026-10-29):** `scripts/gullible_agent.py` only knows the
+filesystem tools, so it can't drive the database leg. The harness also
+needs a scripted Pagila agent (list tables, run a query, submit; still
+`mockllm`, $0), for its existing `mcp-backbone-gateway` target. Both
+harness changes were requested from the harness's own session (one
+session per project). The harness's local MCP-backbone (`repro/`) is an
+older build without tracing, so the end-to-end runner here starts
+MCP-backbone's current `main` locally instead, as
+`demos/mcp_backbone_trace.py` already does. This repo's part is the
+glue: that runner, and a check that the resulting trace crosses all
+three services, correctly nested.
+
 ## Sources
 
 - OpenTelemetry GenAI conventions (spans, agent spans, MCP):

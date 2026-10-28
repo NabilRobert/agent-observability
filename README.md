@@ -15,8 +15,8 @@ the MCP security gateway is the next slice
 | [MCP-backbone](https://github.com/NabilRobert/MCP-backbone) (MCP server) | Live: a span per stage of every tool call, under the MCP SDK's own span | Built, merged (opt-in by setting an endpoint) |
 | [Pitstop](https://github.com/NabilRobert/pitstop-crew-public) (agent pipeline) | Replayed: its 62 recorded runs (653 steps) from a backup, with the original times | Built, checked |
 | [agent-eval-harness](https://github.com/NabilRobert/agent-eval-harness) (agent evaluation) | Replayed: its 20 published Inspect runs (1,777 samples, 7,068 real model calls), with the original times and each call's own cost | Built, checked |
-| [MCP security gateway](https://github.com/NabilRobert/mcp-security-gateway) | Live, built in its own project | Next |
-| agent-eval-harness, live | A scripted agent through the gateway to MCP-backbone ($0) | Next |
+| [MCP security gateway](https://github.com/NabilRobert/mcp-security-gateway) | Live: a span per stage of every call, between the agent's and the MCP server's | Built on its branch; the full path passes the end-to-end check |
+| agent-eval-harness, live | A scripted agent through the gateway to MCP-backbone ($0) | Next; a stand-in agent runs the path today |
 
 ## What it looks like
 
@@ -39,6 +39,16 @@ MCP-backbone's tools. Of its 11.8 s, the four model calls take 11.5 s; the
 tool calls take 50–100 ms each.
 
 ![A replayed harness sample in Jaeger](docs/img/harness-replay-trace.png)
+
+The whole path, live: a stand-in scripted agent asks the gateway, which
+asks MCP-backbone, which queries Postgres. One trace, three services, 37
+spans: the gateway's stages (rate limit, policy, audit, forward, detect)
+sit between the agent's call and MCP-backbone's own stages, down to the
+database. `e2e.check` passes this path with every process stopped
+normally (the gateway's tracing branch, `26d58b4`). The stand-in agent is
+replaced by the harness's own once that lands.
+
+![One request across agent, gateway and MCP-backbone in Jaeger](docs/img/end-to-end-trace.png)
 
 ## What's checked
 
@@ -98,6 +108,24 @@ Replay Pitstop's traces (needs the private backup):
 ```bash
 replay/pitstop/run.sh path/to/pitstop.dump
 ```
+
+Run the whole path locally, then check the trace (needs an MCP-backbone
+checkout and the mcp-gateway repo; the gateway is exported with `git
+archive`, so its checkout isn't touched):
+
+```bash
+uv run --project ../MCP-backbone python demos/end_to_end.py --backbone ../MCP-backbone --gateway ../mcp-gateway
+```
+
+```bash
+uv run python -m e2e.check --service demo-agent --service mcp-security-gateway --service mcp-backbone
+```
+
+The check passes when the latest trace has one root, no span whose parent
+is missing, every service on the path, and a database stage reached
+through them in order. With the gateway's tracing branch
+(`--gateway-ref feat/otel-tracing`, until it merges) it passes: one
+trace, three services, down to the database.
 
 Replay the harness's published runs (needs a clone of agent-eval-harness;
 read with `git show`, so its checkout isn't touched):
