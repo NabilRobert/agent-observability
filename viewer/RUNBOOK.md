@@ -3,7 +3,8 @@
 How to install, reach, feed, run and remove the viewer (Jaeger v2, one
 container) on the server that also runs MCP-backbone. Decisions behind it:
 [Phase 5](../docs/planning/phase-5-architecture-decisions.md), ADR-001
-(Jaeger, Badger, 256 MB) and ADR-007 (reachable only by SSH tunnel).
+(Jaeger, bounded in-memory storage, 256 MB) and ADR-007 (reachable only
+by SSH tunnel).
 
 `<server>` and `<user>` stand for the server's SSH host and login; they
 are not written down here on purpose. Commands marked *laptop* run on your
@@ -17,13 +18,20 @@ own machine; all others run on the server.
 | Image | `jaegertracing/jaeger` 2.22.0, pinned by its multi-arch digest (amd64 and arm64) |
 | Ports | 16686 (UI and query API), 4318 (OTLP/HTTP in), 13133 (health): **all on 127.0.0.1 only** |
 | Limits | 256 MB of memory, half a CPU, read-only root filesystem, no capabilities |
-| Storage | Badger on the named volume `agent-observability_traces`, spans kept 30 days |
-| Measured | 15 MiB idle; 95 MiB with the Pitstop replay and the MCP-backbone tests loaded; 4.2 MB of real disk |
+| Storage | In memory, at most 5,000 traces (the oldest are dropped first); nothing on disk |
+| Measured | 79 MiB holding both replays (Pitstop's 62 runs and the harness's 1,777 samples, 29,500 spans); peak 73–79 MiB while importing them |
 | Secrets | None. The UI has no login, which is why nothing is published |
 
 Traces are a view, not a record: each system's own records (MCP-backbone's
-audit table, Pitstop's backup) are the truth. So the viewer has no backup,
-and losing its volume loses nothing that can't be replayed or re-collected.
+audit table, Pitstop's backup, the harness's run logs) are the truth. So
+the viewer keeps traces in memory only, and **a restart empties it**: re-run
+the two replays below (they take seconds, and give the same IDs every
+time), and live traces start again from the next tool call.
+
+Why not on disk: Jaeger's disk store (Badger) peaked at 532 MiB importing
+the harness's runs, and Jaeger offers no way to size its buffers, so it
+was killed at the 256 MB limit. The same traces in memory take under
+80 MiB.
 
 ## Before installing (once)
 
@@ -138,6 +146,20 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:14318 JAEGER_QUERY_URL=http://127.0
 It ends with `ok: 62 runs, 653 steps checked against the viewer`. The IDs
 are derived from the records, so running it again changes nothing.
 
+## Send the harness's replayed runs (laptop)
+
+The harness's run logs are already public in its repo; the replay reads
+them from its git history with `git show`, so its checkout is untouched.
+With the same tunnel open:
+
+```bash
+OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:14318 JAEGER_QUERY_URL=http://127.0.0.1:26686 replay/inspect/run.sh path/to/agent-eval-harness
+```
+
+It ends with `ok: 20 runs, 1777 samples, 28884 spans checked against the
+viewer, with cost and tokens; 0 problems` (at the harness's `main` of
+2026-10-28; later runs add more).
+
 ## Routine operations
 
 All from `~/agent-observability`.
@@ -148,15 +170,12 @@ All from `~/agent-observability`.
 | End-to-end check | `viewer/smoke.sh` |
 | Logs | `docker compose -f viewer/compose.yaml logs --tail 50` |
 | Memory | `docker stats --no-stream agent-observability-jaeger-1` |
-| Real disk use | `sudo du -sh /var/lib/docker/volumes/agent-observability_traces/_data` |
-| Restart (traces survive) | `docker compose -f viewer/compose.yaml restart` |
+| Restart (**empties it**; re-run the replays) | `docker compose -f viewer/compose.yaml restart` |
 
-**Disk, read correctly:** Badger preallocates a 2 GB value log, but the
-file is sparse. `ls -l` shows its apparent size, while `du` (above) shows
-what it really occupies.
-
-**Change the retention:** edit `ttl.spans` in `viewer/config.yaml` (commit
-the change), then restart. Shorter retention means less memory and disk.
+**Change how much it keeps:** edit `max_traces` in `viewer/config.yaml`
+(commit the change), then restart. 1,839 traces took about 75 MiB, so
+memory grows by roughly 40 KiB per trace of the harness's size; keep
+the limit well inside the 256 MB.
 
 **Upgrade Jaeger:**
 1. On the *laptop*, pick a release at least two weeks old.
@@ -187,8 +206,8 @@ and spans are dropped until the viewer is back.
    the `Environment=OTEL_EXPORTER_OTLP_ENDPOINT=...` line, save, then
    `sudo systemctl restart mcp-backbone`. (This step is optional for
    safety, since a dead viewer is harmless, but it keeps the logs quiet.)
-2. Stop the viewer, keeping its traces:
-   `docker compose -f viewer/compose.yaml down`.
-3. To delete the traces too: `docker compose -f viewer/compose.yaml down -v`.
-   **This can't be undone**; replayed traces can be replayed again,
-   live ones are gone.
+2. Stop and remove the viewer:
+   `docker compose -f viewer/compose.yaml down -v`. The traces were only in
+   memory, so they go with it (replayed ones can be replayed again; live
+   ones are gone); `-v` also removes the empty `/tmp` volume the image
+   declares.
