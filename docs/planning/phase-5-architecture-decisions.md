@@ -254,6 +254,38 @@ set that does the job.
 **Consequences:**
 - The replay runs anywhere Docker and `uv` do, with no credentials.
 
+### ADR-009: The live end-to-end run reuses the harness's own scripted agent
+
+Added 2026-10-28, under the rule "reuse before building".
+
+**Decision:** slice 5(b), the one live trace from agent to database,
+reuses what already exists and builds only the glue:
+- **The agent:** the harness's scripted agent, `scripts/gullible_agent.py`
+  (Inspect's `mockllm`, so $0), which already runs through the gateway
+  with a gateway target.
+- **The propagation:** the MCP Python SDK 2.3.0, already in the harness,
+  injects the trace context into each request's `_meta` once a tracer
+  provider is installed; the gateway and MCP-backbone pick it up on the
+  same SDK.
+- **The new part:** installing a tracer provider in the harness's process
+  (off unless `OTEL_EXPORTER_OTLP_ENDPOINT` is set, as in MCP-backbone),
+  and one root span per sample, so the agent's side has a parent.
+
+**Options considered:**
+- *Inspect AI's own tracing:* none to reuse; version 0.3.283 has no
+  OpenTelemetry code (checked in the harness's installed package).
+- *A new demo agent, like `demos/mcp_backbone_trace.py`:* it would prove
+  the path, but not through the harness, which is the point of the slice.
+- *A third-party tracing layer (OpenInference, Langfuse's SDK):* whether
+  either supports Inspect directly wasn't checked; either way they use
+  their own attribute conventions, not the OpenTelemetry GenAI ones this
+  project follows (ADR-004), and would add a dependency for what is a few
+  lines of glue.
+
+**Consequences:** the harness gains two dependencies (the OpenTelemetry
+SDK and OTLP/HTTP exporter, as MCP-backbone has), and the change lives in
+the harness's own repo, on a branch, per the rule.
+
 ## Sources
 
 - OpenTelemetry GenAI conventions (spans, agent spans, MCP):

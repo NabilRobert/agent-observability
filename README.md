@@ -12,10 +12,10 @@ the MCP security gateway is the next slice
 
 | Source | How | State |
 |---|---|---|
-| [MCP-backbone](https://github.com/NabilRobert/MCP-backbone) (MCP server) | Live: a span per stage of every tool call, under the MCP SDK's own span | Built, on a branch there |
+| [MCP-backbone](https://github.com/NabilRobert/MCP-backbone) (MCP server) | Live: a span per stage of every tool call, under the MCP SDK's own span | Built, merged (opt-in by setting an endpoint) |
 | [Pitstop](https://github.com/NabilRobert/pitstop-crew-public) (agent pipeline) | Replayed: its 62 recorded runs (653 steps) from a backup, with the original times | Built, checked |
 | [agent-eval-harness](https://github.com/NabilRobert/agent-eval-harness) (agent evaluation) | Replayed: its 20 published Inspect runs (1,777 samples, 7,068 real model calls), with the original times and each call's own cost | Built, checked |
-| MCP security gateway | Live, built in its own project | Next |
+| [MCP security gateway](https://github.com/NabilRobert/mcp-security-gateway) | Live, built in its own project | Next |
 | agent-eval-harness, live | A scripted agent through the gateway to MCP-backbone ($0) | Next |
 
 ## What it looks like
@@ -122,3 +122,7 @@ uv run pytest
   attributes every source follows.
 - [`docs/planning/`](docs/planning/): Phases 1–7, from the problem brief
   to the slice plan, with the spike results.
+
+## License
+
+[MIT](LICENSE).
