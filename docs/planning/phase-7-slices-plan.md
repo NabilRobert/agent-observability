@@ -34,6 +34,14 @@ has no spans of its own yet. Requested from their sessions: the gateway's
 spans (slice 4), and the harness's tracer provider and scripted Pagila
 agent (slice 5b), which replaces the stand-in.
 
+**Slice 4 done (2026-10-29), on the gateway's branch:** with its tracing
+(`feat/otel-tracing`, `26d58b4`), the full path passes the end-to-end
+check: one trace, 37 spans from three services, every process stopped
+normally. The first try lost the gateway's last spans on SIGTERM: uvicorn
+re-raises the captured signal after a graceful shutdown, killing the
+process before the gateway's `finally` ran. The gateway now turns SIGTERM
+into an ordinary exit.
+
 **Order:** spikes → 0 → 1 → 2 → 3 → checkpoint → (4, by the gateway
 session) → 5 → 6 → 7. Slices 2 and 3 touch different repos and could run
 in parallel.
