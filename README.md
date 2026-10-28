@@ -40,6 +40,16 @@ tool calls take 50–100 ms each.
 
 ![A replayed harness sample in Jaeger](docs/img/harness-replay-trace.png)
 
+The whole path, live: a stand-in scripted agent asks the gateway, which
+asks MCP-backbone, which queries Postgres. One trace, three services, 37
+spans: the gateway's stages (rate limit, policy, audit, forward, detect)
+sit between the agent's call and MCP-backbone's own stages, down to the
+database. Taken with the gateway's tracing branch, before its fix for
+flushing spans on SIGTERM; the stand-in agent is replaced by the
+harness's own once that lands.
+
+![One request across agent, gateway and MCP-backbone in Jaeger](docs/img/end-to-end-trace.png)
+
 ## What's checked
 
 - **No content by default.** MCP-backbone records no SQL text, rejection
