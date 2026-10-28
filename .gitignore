@@ -12,6 +12,7 @@ NOTES*.md
 *.dump
 *.sql.gz
 replay/pitstop/out/
+replay/inspect/out/
 
 # Python
 __pycache__/
