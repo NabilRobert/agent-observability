@@ -6,10 +6,9 @@ Each pipeline run becomes one trace. IDs are derived from the run and
 step IDs, so replaying the same snapshot twice gives the same IDs, and
 the times are the recorded ones, unshifted (Phase 5, ADR-006)."""
 
-import hashlib
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import datetime
 from decimal import Decimal
 from typing import Any
 
@@ -19,8 +18,9 @@ from opentelemetry.sdk.util.instrumentation import InstrumentationScope
 from opentelemetry.trace import SpanContext, SpanKind, Status, StatusCode, TraceFlags
 from opentelemetry.util.types import AttributeValue
 
+from replay.common import derived_id, parse_time, to_unix_nanos
+
 SCOPE = InstrumentationScope("agentobs.replay.pitstop", "0.1.0")
-_EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
 
 # String values in `meta` that are labels, not content: safe to record
 # without content capture. Every other string (feedback, reasons, dates,
@@ -85,8 +85,8 @@ class Step:
             kind=str(r["kind"]),
             name=str(r["name"]),
             status=str(r["status"]),
-            started_at=_parse_time(r["started_at"]),
-            ended_at=None if r["ended_at"] is None else _parse_time(r["ended_at"]),
+            started_at=parse_time(r["started_at"]),
+            ended_at=None if r["ended_at"] is None else parse_time(r["ended_at"]),
             model=r["model"] or None,
             tokens_in=r["tokens_in"],
             tokens_out=r["tokens_out"],
@@ -97,26 +97,12 @@ class Step:
         )
 
 
-def _parse_time(value: str) -> datetime:
-    return datetime.fromisoformat(value).astimezone(UTC)
-
-
-def to_unix_nanos(t: datetime) -> int:
-    """Exact: whole microseconds, as Postgres stores them, never a float."""
-    return (t - _EPOCH) // timedelta(microseconds=1) * 1000
-
-
 def trace_id_for(run_id: int) -> int:
-    return _derived_id(f"pitstop/run/{run_id}", 16)
+    return derived_id(f"pitstop/run/{run_id}", 16)
 
 
 def span_id_for(step_id: int) -> int:
-    return _derived_id(f"pitstop/step/{step_id}", 8)
-
-
-def _derived_id(key: str, size: int) -> int:
-    value = int.from_bytes(hashlib.sha256(key.encode()).digest()[:size], "big")
-    return value or 1  # an all-zero ID is invalid; vanishingly unlikely
+    return derived_id(f"pitstop/step/{step_id}", 8)
 
 
 def resource_for(snapshot: str) -> Resource:

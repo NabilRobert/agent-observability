@@ -9,32 +9,21 @@ non-zero, naming each run and what differs, if anything is off."""
 
 import argparse
 import json
-import os
 import sys
-import urllib.error
-import urllib.request
-from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from collections.abc import Callable, Sequence
 from decimal import Decimal
 from pathlib import Path
-from typing import Any
 
-from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
-from opentelemetry.sdk.trace.export import SpanExportResult
-
+from replay.common import StoredSpan, fetch_trace, send_spans, to_unix_nanos
 from replay.pitstop.mapping import (
     Step,
     group_runs,
     resource_for,
     span_for,
     span_id_for,
-    to_unix_nanos,
     trace_id_for,
 )
 
-OTLP = os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT", "http://127.0.0.1:4318")
-QUERY = os.environ.get("JAEGER_QUERY_URL", "http://127.0.0.1:16686")
-BATCH = 256
 # NUMERIC(12, 6) rounds each recorded cost to a millionth of a dollar.
 COST_TOLERANCE_PER_CALL = Decimal("0.00001")
 
@@ -50,57 +39,11 @@ def send(steps: Sequence[Step], snapshot: str, include_content: bool) -> int:
         for run in group_runs(steps).values()
         for s in run
     ]
-    exporter = OTLPSpanExporter(endpoint=f"{OTLP.rstrip('/')}/v1/traces", timeout=10)
-    for i in range(0, len(spans), BATCH):
-        if exporter.export(spans[i : i + BATCH]) is not SpanExportResult.SUCCESS:
-            print(f"error: export failed at span {i} of {len(spans)}", file=sys.stderr)
-            return 1
-    exporter.shutdown()
+    if not send_spans(spans):
+        print(f"error: export of {len(spans)} spans failed", file=sys.stderr)
+        return 1
     print(f"sent {len(spans)} spans in {len(group_runs(steps))} traces")
     return 0
-
-
-@dataclass(frozen=True)
-class StoredSpan:
-    """One span as the viewer returns it."""
-
-    span_id: int
-    parent_id: int | None
-    name: str
-    start: int
-    end: int
-    attributes: Mapping[str, Any]
-
-
-def parse_otlp_json(body: Mapping[str, Any]) -> list[StoredSpan]:
-    """The spans in a Jaeger v3 API trace response (OTLP JSON)."""
-    out: list[StoredSpan] = []
-    for rs in body["result"]["resourceSpans"]:
-        for ss in rs["scopeSpans"]:
-            for s in ss["spans"]:
-                parent = s.get("parentSpanId") or None
-                out.append(
-                    StoredSpan(
-                        span_id=int(s["spanId"], 16),
-                        parent_id=None if parent is None else int(parent, 16),
-                        name=s["name"],
-                        start=int(s["startTimeUnixNano"]),
-                        end=int(s["endTimeUnixNano"]),
-                        attributes={
-                            a["key"]: _otlp_value(a["value"]) for a in s.get("attributes", [])
-                        },
-                    )
-                )
-    return out
-
-
-def _otlp_value(value: Mapping[str, Any]) -> Any:
-    if "intValue" in value:
-        return int(value["intValue"])
-    for key in ("doubleValue", "stringValue", "boolValue"):
-        if key in value:
-            return value[key]
-    return value
 
 
 def check_run(run: Sequence[Step], stored: Sequence[StoredSpan]) -> list[str]:
@@ -146,16 +89,6 @@ def check_run(run: Sequence[Step], stored: Sequence[StoredSpan]) -> list[str]:
                 f"run {run_id}: model-call costs add up to {sum(costs)}, recorded {recorded}"
             )
     return problems
-
-
-def fetch_trace(trace_id: int) -> list[StoredSpan]:
-    try:
-        with urllib.request.urlopen(f"{QUERY}/api/v3/traces/{trace_id:032x}", timeout=10) as r:
-            return parse_otlp_json(json.load(r))
-    except urllib.error.HTTPError as exc:
-        if exc.code == 404:
-            return []
-        raise
 
 
 def check(

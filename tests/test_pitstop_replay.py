@@ -11,6 +11,7 @@ import pytest
 from opentelemetry.sdk.trace import ReadableSpan
 from opentelemetry.trace import SpanKind, StatusCode
 
+from replay.common import StoredSpan, parse_otlp_json
 from replay.pitstop.mapping import (
     ReplayError,
     Step,
@@ -20,7 +21,7 @@ from replay.pitstop.mapping import (
     span_id_for,
     trace_id_for,
 )
-from replay.pitstop.replay import StoredSpan, check, check_run, load_steps, parse_otlp_json
+from replay.pitstop.replay import check, check_run, load_steps
 
 FIXTURE = Path(__file__).parent / "fixtures" / "pitstop_steps.json"
 MARKER = "zzcontent9b1"
