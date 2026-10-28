@@ -111,3 +111,18 @@ def test_the_viewer_response_carries_service_and_trace() -> None:
     }
     (span,) = parse_otlp_json(body)
     assert (span.service, span.trace_id, span.parent_id) == ("gw", 10, None)
+
+
+def test_every_hop_must_be_the_next_one_on_the_path() -> None:
+    # Another service between the gateway and MCP-backbone: the request
+    # doesn't go straight from one to the next, so the given path fails,
+    # and passes once that service is named in it.
+    spans = [replace(s, parent_id=11) if s.span_id == 6 else s for s in _good()]
+    spans.append(_span(11, 5, "other-proxy", "tools/call run_query"))
+    assert check_trace(spans, PATH)[-1].endswith(
+        "paths found: agent-eval-harness -> mcp-security-gateway -> other-proxy -> mcp-backbone"
+    )
+    assert check_trace(spans, (*PATH[:2], "other-proxy", PATH[2])) == []
+    # The right services in the wrong order fail too.
+    backwards = ("mcp-security-gateway", "agent-eval-harness", "mcp-backbone")
+    assert check_trace(_good(), backwards)[-1].startswith("no database stage is reached through")
