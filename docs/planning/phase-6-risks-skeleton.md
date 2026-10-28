@@ -88,8 +88,10 @@ and its checks.
 ## Spike results
 
 Run 2026-10-27 on Arthur's laptop (Apple silicon, Docker Desktop), in
-the order 2 → 4 → 1 → 3. All four passed. The scripts are in
-[`spikes/`](../../spikes/).
+the order 2 → 4 → 1 → 3. All four passed. The throwaway scripts were
+removed from `main` once these results were recorded; they are kept on
+the branch
+[`spike/phase-6`](https://github.com/NabilRobert/agent-observability/tree/spike/phase-6/spikes).
 
 | # | Result | Consequence for the build |
 |---|---|---|
