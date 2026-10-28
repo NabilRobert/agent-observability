@@ -76,7 +76,7 @@ class Step:
     error_message: str | None
 
     @classmethod
-    def from_record(cls, r: Mapping[str, Any]) -> "Step":
+    def from_record(cls, r: Mapping[str, Any]) -> Step:
         return cls(
             id=int(r["id"]),
             run_id=int(r["run_id"]),
