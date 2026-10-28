@@ -25,6 +25,7 @@
   repeat runs would duplicate). → Spike 4.
 - **Jaeger goes over 256 MB.** **Likelihood: low** at this volume.
   **Impact: medium** (the server is shared). → Measured in Spike 1.
+  *(It happened, in slice 5: see the as-built note below and on ADR-001.)*
 - **The conventions move.** The GenAI and MCP conventions are at
   "Development" status and were recently moved to their own repository.
   **Likelihood: high. Impact: low**, with the revision pinned in the
@@ -111,3 +112,9 @@ export timeout, so a full queue (four batches) and a dead viewer held
 the shutdown for 5.3 s. MCP-backbone now caps the whole shutdown at 2 s
 (`shutdown_tracing`), with a test that queues four batches.
 
+**As built (slice 5):** the memory risk, rated low, happened. Spike 1
+measured Jaeger idle (15 MiB). Importing the harness's 1,777 replayed runs
+into Badger peaked at 532 MiB and the container was killed at its 256 MB
+limit. The viewer now keeps traces in memory (ADR-001's as-built note):
+72 MiB for the same data. The lesson: measure under the real load, not
+idle.

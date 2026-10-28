@@ -90,6 +90,27 @@ Never read: `trace_payloads` (prompts, responses, built context). With
 `--include-content`, the replay adds the short `summary`, string `meta`
 values and error messages; it never adds payloads.
 
+## agent-eval-harness (replayed from its Inspect logs)
+
+Resource: `service.name=agent-eval-harness`, `agentobs.replay=true`,
+`agentobs.replay.snapshot` (the harness repo's commit and the run, e.g.
+`agent-eval-harness@14cf126b5d21 runs/proof-mini-a`). One trace per
+sample and epoch; IDs derived from Inspect's own span and event IDs.
+Inspect's own span tree is kept as it was recorded.
+
+| Recorded | Span name | Kind | Mapping |
+|---|---|---|---|
+| The sample | `eval sample {id}` | INTERNAL | `inspect.run`, `inspect.eval_id`, `inspect.task`, `inspect.sample.id`, `inspect.epoch`, `inspect.model`, `gen_ai.provider.name`, `gen_ai.request.model`; scores as `inspect.score.{scorer}.{key}`; a hit limit as `inspect.limit.type` and `inspect.limit.value`; the sample's own totals as `inspect.recorded.cost_usd`, `.input_tokens`, `.output_tokens` (the check compares them with the calls) |
+| Span, type `agent` | `invoke_agent {name}` | INTERNAL | `gen_ai.operation.name=invoke_agent`, `gen_ai.agent.name` |
+| Span, type `tool` (with its tool event) | `execute_tool {name}` | INTERNAL | `gen_ai.operation.name=execute_tool`, `gen_ai.tool.name`, `gen_ai.tool.type=function`, `gen_ai.tool.call.id`; a tool error as `error.type=inspect.tool_{type}` |
+| Other spans (`init`, `solvers`, `solver`, `scorers`, `scorer`) | `{type} {name}`, or the name when they match | INTERNAL | `inspect.span.type` |
+| Model event | `chat {model}` | CLIENT | `gen_ai.provider.name` (`openai` for `openai-api/...`), `gen_ai.request.model` (the last path segment), `inspect.model` (in full), input, output, cache-read and reasoning tokens, `gen_ai.response.finish_reasons`, `gen_ai.response.id`, `agentobs.cost.usd` from the call's own `total_cost`; a failed call as `error.type` (the exception's class) |
+| A model call with no recorded end (cancelled) | as above | CLIENT | zero length, `inspect.event.unfinished=true` |
+
+Never read: prompts, model outputs, tool results. With
+`--include-content`, the replay adds tool-call arguments
+(`gen_ai.tool.call.arguments`) and error messages.
+
 ## For the gateway
 
 - Let the MCP SDK's own server and client spans stand; call the upstream

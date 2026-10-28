@@ -46,6 +46,19 @@ the riskiest of them before the build.
   (Phase 6, Spike 1).
 - The UI has no login, which decides ADR-007.
 
+**As built (2026-10-28): in memory, not Badger.** Replaying the
+harness's 1,777 runs into Badger peaked at 532 MiB, and the container was
+killed at its 256 MB limit. Jaeger opens Badger with Badger's defaults
+(five 64 MB write buffers, a 256 MB read cache) and exposes no setting to
+shrink them, so the limit and Badger can't coexist under a bulk import.
+The idle 15 MiB measured in Spike 1 hid this. The same data in Jaeger's
+memory store peaked at 72 MiB, so the viewer now keeps at most 5,000
+traces in memory. What that costs: a restart empties the viewer. The
+replays are idempotent and put their traces back in seconds, and live
+traces were always a view, not the record (Phase 3), so the trade is
+worth it. *Rejected instead:* raising the limit to fit Badger (about
+768 MB), too much for a shared small server.
+
 ### ADR-002: Export straight to the viewer over OTLP/HTTP
 
 **Decision:**

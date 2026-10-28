@@ -16,9 +16,14 @@ that fails changes the plan below, and the change is recorded.
 | **3. Pitstop replay** | `replay/pitstop/`: restore-and-export script, the replayer, mapping tests on a synthetic fixture, the fidelity and cost checks against the viewer's API. All 62 traced runs in the viewer (screenshot of a daily run) | This repo | None | 0.5 day |
 | **— Checkpoint —** | Slices 0–3: two sources in one viewer, at $0. Report to Arthur with screenshots and the decisions he needs to make | | | |
 | **4. Gateway** | The gateway's own spans, passing `_meta` context through, following the conventions | The gateway's repo, by the gateway's session | None | (theirs) |
-| **5. Harness** | After its in-flight branch merges: (a) its recorded Inspect run logs replayed as spans, the same way as Pitstop's, so real model calls with real tokens and cost appear at $0; (b) a scripted (mock) agent run, live, through the gateway to MCP-backbone, with an automated check that the whole request is one trace across three or more services (Phase 1, metric 1) | agent-eval-harness, a new branch | None (recorded logs; scripted model) | 1 day |
+| **5. Harness** | After its in-flight branch merges: (a) its recorded Inspect run logs replayed as spans, the same way as Pitstop's, so real model calls with real tokens and cost appear at $0; (b) a scripted (mock) agent run, live, through the gateway to MCP-backbone, with an automated check that the whole request is one trace across three or more services (Phase 1, metric 1) | (a) this repo, `replay/inspect/`; (b) agent-eval-harness, a new branch | None (recorded logs; scripted model) | 1 day |
 | **6. Overhead** | A timing script: MCP-backbone tool calls with tracing off, on with a live viewer, and on with a dead one; p50 and p95 | MCP-backbone branch, or here | None | 2 h |
 | **7. Server and write-up** | A runbook for Arthur's server step; the README with screenshots and measured numbers; JOURNEY; a portfolio entry handed to the site session | This repo | None | 0.5 day |
+
+**Progress (2026-10-28):** slices 0–3 and 6 are done, and slice 5(a): all
+20 of the harness's published runs (1,777 samples, 28,884 spans) are
+replayed with 0 problems on the fidelity, cost and token checks. 5(b)
+waits for the gateway's tracing (slice 4).
 
 **Order:** spikes → 0 → 1 → 2 → 3 → checkpoint → (4, by the gateway
 session) → 5 → 6 → 7. Slices 2 and 3 touch different repos and could run
