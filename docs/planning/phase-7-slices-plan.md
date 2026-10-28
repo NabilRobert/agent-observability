@@ -42,6 +42,14 @@ re-raises the captured signal after a graceful shutdown, killing the
 process before the gateway's `finally` ran. The gateway now turns SIGTERM
 into an ordinary exit.
 
+**Slice 5(b) done, and Phase 1's metric 1 met (2026-10-29), locally:**
+the harness's own scripted Pagila agent (its `feat/otel-tracing`,
+`1fc27ae`) answered task `e01` through the gateway (`caa9e65`) and
+MCP-backbone (`main`) against the harness's local Pagila, graded a pass,
+in one trace of 36 spans from three services; `e2e.check` passes its
+default path, agent-eval-harness → mcp-security-gateway → mcp-backbone.
+What remains is deployment (slice 7) and the write-up.
+
 **Order:** spikes → 0 → 1 → 2 → 3 → checkpoint → (4, by the gateway
 session) → 5 → 6 → 7. Slices 2 and 3 touch different repos and could run
 in parallel.
