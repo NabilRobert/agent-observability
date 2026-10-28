@@ -264,6 +264,12 @@ def test_the_checks_pass_on_a_faithful_copy_and_name_each_difference(sample: Sam
     ]
     shifted = [replace(s, start=s.start + 1) if s.name == "scorers" else s for s in good]
     assert check_sample(sample, shifted) == [f"{label}: span 'scorers' has different times"]
+    # Jaeger stores the cancelled call's zero-length span as 1 ns long:
+    # accepted. A real 1 ns difference anywhere else is not.
+    as_jaeger = [replace(s, end=s.end + 1) if s.start == s.end else s for s in good]
+    assert check_sample(sample, as_jaeger) == []
+    longer = [replace(s, end=s.end + 1) if s.name == "scorers" else s for s in good]
+    assert check_sample(sample, longer) == [f"{label}: span 'scorers' has different times"]
     dearer = [
         replace(s, attributes={**s.attributes, "agentobs.cost.usd": 0.002})
         if s.attributes.get("gen_ai.response.id") == "resp_1"

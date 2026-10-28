@@ -123,6 +123,10 @@ def compare_spans(
         parent = span.parent.span_id if span.parent else None
         if got.parent_id != parent:
             problems.append(f"{label}: span {span.name!r} has the wrong parent")
-        if (got.start, got.end) != (span.start_time, span.end_time):
+        # Jaeger stores a zero-length span (a step with no recorded end) as
+        # 1 ns long, treating a zero duration as unset; that is not a
+        # difference in the records.
+        zero_length = span.start_time == span.end_time and got.end == got.start + 1
+        if got.start != span.start_time or (got.end != span.end_time and not zero_length):
             problems.append(f"{label}: span {span.name!r} has different times")
     return problems
