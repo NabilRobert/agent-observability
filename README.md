@@ -6,8 +6,9 @@ small, self-hosted trace viewer (Jaeger v2), so a single agent request can
 be followed from the agent through an MCP server to the database, with the
 latency and the cost of every step.
 
-**Status:** three sources are in, at $0. The live end-to-end trace through
-the MCP security gateway is the next slice
+**Status:** the goal is met locally, at $0: one evaluation sample from
+the harness is followed agent → gateway → MCP-backbone → Postgres as one
+trace (below). Still to come: deploying the viewer to the shared server
 ([Phase 7](docs/planning/phase-7-slices-plan.md)).
 
 | Source | How | State |
@@ -16,7 +17,7 @@ the MCP security gateway is the next slice
 | [Pitstop](https://github.com/NabilRobert/pitstop-crew-public) (agent pipeline) | Replayed: its 62 recorded runs (653 steps) from a backup, with the original times | Built, checked |
 | [agent-eval-harness](https://github.com/NabilRobert/agent-eval-harness) (agent evaluation) | Replayed: its 20 published Inspect runs (1,777 samples, 7,068 real model calls), with the original times and each call's own cost | Built, checked |
 | [MCP security gateway](https://github.com/NabilRobert/mcp-security-gateway) | Live: a span per stage of every call, between the agent's and the MCP server's | Built on its branch; the full path passes the end-to-end check |
-| agent-eval-harness, live | A scripted agent through the gateway to MCP-backbone ($0) | Next; a stand-in agent runs the path today |
+| agent-eval-harness, live | A span per sample and per agent, with each MCP call under it ($0: its scripted agent, no model) | Built on its branch; the full path passes the end-to-end check |
 
 ## What it looks like
 
@@ -40,15 +41,20 @@ tool calls take 50–100 ms each.
 
 ![A replayed harness sample in Jaeger](docs/img/harness-replay-trace.png)
 
-The whole path, live: a stand-in scripted agent asks the gateway, which
-asks MCP-backbone, which queries Postgres. One trace, three services, 37
-spans: the gateway's stages (rate limit, policy, audit, forward, detect)
-sit between the agent's call and MCP-backbone's own stages, down to the
-database. `e2e.check` passes this path with every process stopped
-normally (the gateway's tracing branch, `26d58b4`). The stand-in agent is
-replaced by the harness's own once that lands.
+The whole path, live: the harness's evaluation sample `e01` ("How many
+films are in the database?"), answered by its scripted agent through the
+gateway and MCP-backbone against the Pagila database, and graded a pass.
+One trace, three services, 36 spans: the harness's sample and agent, the
+gateway's stages (rate limit, policy, audit, forward, detect), and
+MCP-backbone's own stages down to the database. `e2e.check` passes it,
+with every process stopped normally. It also shows where the time goes:
+listing Pagila's tables took 532 ms in MCP-backbone, and the gateway's
+`forward` ran on for about 350 ms after the upstream had answered.
 
-![One request across agent, gateway and MCP-backbone in Jaeger](docs/img/end-to-end-trace.png)
+![One evaluation sample across the harness, the gateway and MCP-backbone in Jaeger](docs/img/end-to-end-harness-trace.png)
+
+The same path with a stand-in agent, before the harness's own was ready:
+[`docs/img/end-to-end-trace.png`](docs/img/end-to-end-trace.png).
 
 ## What's checked
 
@@ -119,6 +125,18 @@ uv run --project ../MCP-backbone python demos/end_to_end.py --backbone ../MCP-ba
 
 ```bash
 uv run python -m e2e.check --service demo-agent --service mcp-security-gateway --service mcp-backbone
+```
+
+With the harness's own agent instead (needs an agent-eval-harness
+checkout with tracing, and its local Pagila stack up), the check runs on
+its default path:
+
+```bash
+uv run --project ../MCP-backbone python demos/end_to_end.py --backbone ../MCP-backbone --gateway ../mcp-gateway --agent harness --harness ../agent-eval-harness
+```
+
+```bash
+uv run python -m e2e.check
 ```
 
 The check passes when the latest trace has one root, no span whose parent

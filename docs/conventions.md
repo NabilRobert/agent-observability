@@ -43,7 +43,7 @@ only records which ones, and fills the gaps.
 | Agent | `invoke_agent {gen_ai.agent.name}` | INTERNAL (in-process) or CLIENT (remote agent) | `gen_ai.operation.name=invoke_agent`, `gen_ai.agent.name` |
 | Workflow (a pipeline of agents) | `invoke_workflow {gen_ai.workflow.name}` | INTERNAL | `gen_ai.operation.name=invoke_workflow`, `gen_ai.workflow.name` |
 | Tool call, agent side | `execute_tool {gen_ai.tool.name}` | INTERNAL | `gen_ai.operation.name=execute_tool`, `gen_ai.tool.name`, `gen_ai.tool.call.id` |
-| MCP request, client and server | `{mcp.method.name} {target}`, e.g. `tools/call run_query` | CLIENT / SERVER | `mcp.method.name`, `mcp.protocol.version`, `mcp.session.id`, `jsonrpc.request.id`, `gen_ai.tool.name`, `gen_ai.operation.name=execute_tool` (for `tools/call`). **The MCP Python SDK 2.x emits these itself**; a source only installs a tracer provider |
+| MCP request, client and server | Server: `{mcp.method.name} {target}`, e.g. `tools/call run_query`. Client: the convention says the same, but MCP SDK 2.3.0 names it `MCP send {mcp.method.name} {target}` (with only `mcp.method.name` and `jsonrpc.request.id`); left as the SDK makes it | CLIENT / SERVER | `mcp.method.name`, `mcp.protocol.version`, `mcp.session.id`, `jsonrpc.request.id`, `gen_ai.tool.name`, `gen_ai.operation.name=execute_tool` (for `tools/call`). **The MCP Python SDK 2.x emits these itself**; a source only installs a tracer provider |
 | Database call | the stage name (see below) | CLIENT | `db.system.name=postgresql`, `db.operation.name`, `db.collection.name` (when it is our own table), `db.response.returned_rows`; `db.query.text` only with content capture on |
 
 ## MCP-backbone
