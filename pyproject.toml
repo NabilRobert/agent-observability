@@ -3,6 +3,7 @@ name = "agent-observability"
 version = "0.1.0"
 description = "One OpenTelemetry tracing pipeline across agent projects"
 requires-python = ">=3.14"
+license = "MIT"
 dependencies = [
     "opentelemetry-sdk>=1.30",
     "opentelemetry-exporter-otlp-proto-http>=1.30",
