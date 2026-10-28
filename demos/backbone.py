@@ -33,10 +33,14 @@ def use_test_database(checkout: Path) -> None:
 
 
 @contextlib.asynccontextmanager
-async def seeded(query_rate_limit: int | None = None) -> AsyncGenerator[str]:
+async def seeded(
+    query_rate_limit: int | None = None, target_url: str | None = None
+) -> AsyncGenerator[str]:
     """Creates the tables, a workspace (with its own query rate limit, if
     given) and a `film` table, yields the workspace's API key, and drops
-    everything afterwards, as the test suite does."""
+    everything afterwards, as the test suite does. With `target_url`, the
+    workspace queries that database instead (for example the harness's
+    local Pagila), and no `film` table is made."""
     from app.auth.models import ApiKey, Workspace
     from app.auth.security import generate_api_key, hash_api_key
     from app.db import Base, SessionLocal, dispose_target_engines, engine
@@ -57,7 +61,7 @@ async def seeded(query_rate_limit: int | None = None) -> AsyncGenerator[str]:
             session.add(
                 DataSourceConnection(
                     workspace_id=workspace.id,
-                    connection_url=engine.url.render_as_string(hide_password=False),
+                    connection_url=target_url or engine.url.render_as_string(hide_password=False),
                 )
             )
             api_key = generate_api_key()
@@ -69,16 +73,19 @@ async def seeded(query_rate_limit: int | None = None) -> AsyncGenerator[str]:
                     created_at=now,
                 )
             )
-            await session.execute(
-                text("create table film (id serial primary key, title text, rental_rate numeric)")
-            )
-            await session.execute(
-                text(
-                    "insert into film (title, rental_rate) values "
-                    "('Academy Dinosaur', 0.99), ('Ace Goldfinger', 4.99), "
-                    "('Adaptation Holes', 2.99), ('Affair Prejudice', 2.99)"
+            if target_url is None:
+                await session.execute(
+                    text(
+                        "create table film (id serial primary key, title text, rental_rate numeric)"
+                    )
                 )
-            )
+                await session.execute(
+                    text(
+                        "insert into film (title, rental_rate) values "
+                        "('Academy Dinosaur', 0.99), ('Ace Goldfinger', 4.99), "
+                        "('Adaptation Holes', 2.99), ('Affair Prejudice', 2.99)"
+                    )
+                )
             await session.commit()
         yield api_key
     finally:

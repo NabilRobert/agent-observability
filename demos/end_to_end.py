@@ -3,16 +3,24 @@
 one request (ADR-009). Then `uv run python -m e2e.check` checks the trace.
 
 - MCP-backbone: the given checkout, served over HTTP on 127.0.0.1:8766,
-  on its disposable test database (seeded, then wiped), traced.
+  its bookkeeping on its disposable test database (seeded, then wiped),
+  traced. It queries either a small `film` table there, or, with
+  `--agent harness`, the harness's own local Pagila (its `repro` stack),
+  read-only, through a loopback-only proxy container on that stack's
+  network; its read-only login is read from the stack, never printed.
 - The gateway: an export of the given ref of its repo (`git archive`, so
   that checkout is never touched), on 127.0.0.1:8080 with a `pagila`
   route, the address the harness's `mcp-backbone-gateway` target uses.
   Rules-only detection: no model is downloaded.
-- The agent: a scripted one (no model), until the harness's scripted Pagila
-  agent exists; it lists the tables and counts the films.
+- The agent: `--agent demo` (default), a stand-in scripted here that lists
+  the tables and counts the films; or `--agent harness`, the harness's own
+  scripted Pagila agent (`scripts/scripted_pagila_agent.py`, Inspect's
+  mockllm, so no model is called), run from the given harness checkout
+  against its `mcp-backbone-gateway` target, and graded as usual.
 
     uv run --project <MCP-backbone checkout> python demos/end_to_end.py \\
-        --backbone <MCP-backbone checkout> --gateway <mcp-gateway repo> [--gateway-ref origin/main]
+        --backbone <MCP-backbone checkout> --gateway <mcp-gateway repo> [--gateway-ref origin/main] \\
+        [--agent harness --harness <agent-eval-harness checkout> [--tasks e01]]
 
 Working files (the gateway export, its config and logs) go in a temp
 folder, agent-observability-e2e. The viewer must be running.
@@ -41,6 +49,17 @@ GATEWAY_URL = "http://127.0.0.1:8080/mcp/pagila/"
 # package-age limit would reject the gateway's own locked versions.
 WORK = Path(tempfile.gettempdir()) / "agent-observability-e2e"
 QUERY = "select count(*) as films from film"
+# The harness's local Pagila (its repro/compose.yaml): the database
+# service on that stack's network, reached through a proxy on loopback.
+REPRO_NETWORK = "agent-eval-repro_default"
+REPRO_SETTINGS_VOLUME = "agent-eval-repro_out"
+PAGILA_PROXY_PORT = 55433
+PROXY_IMAGE = "node:24-alpine"  # already local; a few lines of Node forward the port
+PROXY_JS = (
+    "const net=require('net');net.createServer(c=>{const u=net.connect(5432,'db');"
+    "c.pipe(u);u.pipe(c);u.on('error',()=>c.destroy());c.on('error',()=>u.destroy())})"
+    ".listen(5432)"
+)
 
 GATEWAY_CONFIG = """\
 # Written by agent-observability's demos/end_to_end.py; local only.
@@ -116,6 +135,53 @@ def running(
                 proc.kill()
 
 
+def pagila_target_url() -> str:
+    """The read-only Pagila login the harness's repro stack generated, with
+    its host pointed at the loopback proxy. Read from the stack's settings
+    volume; never printed."""
+    out = subprocess.run(
+        ["docker", "run", "--rm", "-v", f"{REPRO_SETTINGS_VOLUME}:/out:ro", "alpine:3",
+         "cat", "/out/mcp.env"],
+        check=True, capture_output=True, text=True,
+    ).stdout  # fmt: skip
+    for line in out.splitlines():
+        if line.startswith("APP_TARGET_DATABASE_URL="):
+            url = line.split("=", 1)[1].strip()
+            return url.replace("@db:5432/", f"@127.0.0.1:{PAGILA_PROXY_PORT}/")
+    sys.exit("the harness's repro stack has no target database URL; is it set up?")
+
+
+@contextlib.contextmanager
+def pagila_proxy() -> Iterator[None]:
+    """A loopback-only port to the harness's Pagila, for this run only."""
+    name = f"agentobs-pagila-proxy-{os.getpid()}"
+    subprocess.run(
+        ["docker", "run", "-d", "--rm", "--name", name, "--network", REPRO_NETWORK,
+         "-p", f"127.0.0.1:{PAGILA_PROXY_PORT}:5432", PROXY_IMAGE, "node", "-e", PROXY_JS],
+        check=True, capture_output=True,
+    )  # fmt: skip
+    try:
+        yield
+    finally:
+        subprocess.run(["docker", "rm", "-f", name], check=False, capture_output=True)
+
+
+def harness_agent(harness: Path, caller_key: str, tasks: str) -> int:
+    """The harness's scripted Pagila agent, through the gateway; traced as
+    the harness itself traces (service agent-eval-harness)."""
+    env = {k: v for k, v in os.environ.items() if not k.startswith(("OTEL_", "APP_"))}
+    env.pop("VIRTUAL_ENV", None)
+    env |= {"OTEL_EXPORTER_OTLP_ENDPOINT": OTLP, "MCP_GATEWAY_KEY": caller_key}
+    out = subprocess.run(
+        ["uv", "run", "--locked", "python", "scripts/scripted_pagila_agent.py",
+         "--target", "mcp-backbone-gateway", "--tasks", tasks],
+        cwd=harness, env=env, capture_output=True, text=True, check=False,
+    )  # fmt: skip
+    for line in (out.stdout + out.stderr).strip().splitlines()[-6:]:
+        print(f"harness: {line}")
+    return out.returncode
+
+
 async def agent(caller_key: str) -> None:
     """A scripted agent: its own trace, and two tool calls through the gateway."""
     import httpx2
@@ -163,7 +229,9 @@ async def agent(caller_key: str) -> None:
         provider.shutdown()
 
 
-async def run(backbone: Path, gateway_repo: Path, ref: str) -> None:
+async def run(
+    backbone: Path, gateway_repo: Path, ref: str, harness: Path | None, tasks: str
+) -> None:
     WORK.mkdir(parents=True, exist_ok=True)
     gateway = export_gateway(gateway_repo, ref)
     use_test_database(backbone)
@@ -178,12 +246,31 @@ async def run(backbone: Path, gateway_repo: Path, ref: str) -> None:
     )
     config.chmod(0o600)
 
-    async with seeded(query_rate_limit=10**6) as backbone_key:
+    target_url = pagila_target_url() if harness else None
+    with contextlib.ExitStack() as stack:
+        if harness:
+            stack.enter_context(pagila_proxy())
+        await serve_and_run(backbone_cmd(), config, gateway, caller_key, target_url, harness, tasks)
+
+
+def backbone_cmd() -> list[str]:
+    return [
+        sys.executable, "-m", "uvicorn", "app.main:app",
+        "--host", "127.0.0.1", "--port", str(BACKBONE_PORT),
+    ]  # fmt: skip
+
+
+async def serve_and_run(
+    backbone_cmd: list[str],
+    config: Path,
+    gateway: Path,
+    caller_key: str,
+    target_url: str | None,
+    harness: Path | None,
+    tasks: str,
+) -> None:
+    async with seeded(query_rate_limit=10**6, target_url=target_url) as backbone_key:
         traced = {**os.environ, "OTEL_EXPORTER_OTLP_ENDPOINT": OTLP}
-        backbone_cmd = [
-            sys.executable, "-m", "uvicorn", "app.main:app",
-            "--host", "127.0.0.1", "--port", str(BACKBONE_PORT),
-        ]  # fmt: skip
         gateway_env = {
             **traced,
             "OTEL_SERVICE_NAME": "mcp-security-gateway",
@@ -215,7 +302,11 @@ async def run(backbone: Path, gateway_repo: Path, ref: str) -> None:
                     gateway_proc,
                     WORK / "gateway.log",
                 )
-                await agent(caller_key)
+                if harness:
+                    code = harness_agent(harness, caller_key, tasks)
+                    print(f"harness agent exit code: {code} (0: every trial passed)")
+                else:
+                    await agent(caller_key)
 
 
 def main() -> None:
@@ -223,8 +314,18 @@ def main() -> None:
     parser.add_argument("--backbone", type=Path, required=True, help="MCP-backbone checkout")
     parser.add_argument("--gateway", type=Path, required=True, help="mcp-gateway repo")
     parser.add_argument("--gateway-ref", default="origin/main")
+    parser.add_argument("--agent", choices=["demo", "harness"], default="demo")
+    parser.add_argument(
+        "--harness", type=Path, help="agent-eval-harness checkout (--agent harness)"
+    )
+    parser.add_argument("--tasks", default="e01", help="Pagila task ids for --agent harness")
     args = parser.parse_args()
-    asyncio.run(run(args.backbone.resolve(), args.gateway.resolve(), args.gateway_ref))
+    if args.agent == "harness" and not args.harness:
+        parser.error("--agent harness needs --harness <agent-eval-harness checkout>")
+    harness = args.harness.resolve() if args.agent == "harness" else None
+    asyncio.run(
+        run(args.backbone.resolve(), args.gateway.resolve(), args.gateway_ref, harness, args.tasks)
+    )
 
 
 if __name__ == "__main__":
