@@ -126,3 +126,13 @@ def test_every_hop_must_be_the_next_one_on_the_path() -> None:
     # The right services in the wrong order fail too.
     backwards = ("mcp-security-gateway", "agent-eval-harness", "mcp-backbone")
     assert check_trace(_good(), backwards)[-1].startswith("no database stage is reached through")
+
+
+def test_only_the_mcp_servers_stages_count_as_reaching_the_database() -> None:
+    # The gateway writes its own audit log; a gateway span named "audit"
+    # must not stand in for MCP-backbone reaching Postgres.
+    spans = [s for s in _good() if s.service != "mcp-backbone"]
+    spans.append(_span(12, 3, "mcp-security-gateway", "audit"))
+    assert check_trace(spans, PATH)[-1] == (
+        "no database stage (audit, cost_check, execute) from mcp-backbone"
+    )
