@@ -120,8 +120,16 @@ uv run pytest
 
 - [`docs/conventions.md`](docs/conventions.md): the span names and
   attributes every source follows.
-- [`docs/planning/`](docs/planning/): Phases 1–7, from the problem brief
-  to the slice plan, with the spike results.
+- [`docs/planning/`](docs/planning/): the plan, in order: Phases 1–7
+  from the problem brief to the slice plan, with an index of the
+  decisions (ADR-001 to 009) and the spike results.
+- [`docs/mcp-backbone-overhead.md`](docs/mcp-backbone-overhead.md): what
+  tracing costs an MCP-backbone tool call, measured (the raw numbers are
+  in the `.json` beside it).
+- [`viewer/README.md`](viewer/README.md) and
+  [`viewer/RUNBOOK.md`](viewer/RUNBOOK.md): running the viewer locally,
+  and on the shared server.
+- [`docs/img/`](docs/img/): the screenshots used above.
 
 ## License
 
