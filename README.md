@@ -6,18 +6,20 @@ small, self-hosted trace viewer (Jaeger v2), so a single agent request can
 be followed from the agent through an MCP server to the database, with the
 latency and the cost of every step.
 
-**Status:** the goal is met locally, at $0: one evaluation sample from
-the harness is followed agent → gateway → MCP-backbone → Postgres as one
-trace (below). Still to come: deploying the viewer to the shared server
-([Phase 7](docs/planning/phase-7-slices-plan.md)).
+**Status:** the goal is met, at $0: one evaluation sample from the
+harness is followed agent → gateway → MCP-backbone → Postgres as one
+trace (below). The viewer is deployed on the shared server, where
+MCP-backbone's live tool calls arrive as traces; it's private, reached
+only through an SSH tunnel ([ADR-007](docs/planning/phase-5-architecture-decisions.md#adr-007-on-the-server-the-viewer-is-reachable-only-by-ssh-tunnel),
+[runbook](viewer/RUNBOOK.md)).
 
 | Source | How | State |
 |---|---|---|
-| [MCP-backbone](https://github.com/NabilRobert/MCP-backbone) (MCP server) | Live: a span per stage of every tool call, under the MCP SDK's own span | Built, merged (opt-in by setting an endpoint) |
+| [MCP-backbone](https://github.com/NabilRobert/MCP-backbone) (MCP server) | Live: a span per stage of every tool call, under the MCP SDK's own span | Built, merged (opt-in by setting an endpoint); on in the deployment |
 | [Pitstop](https://github.com/NabilRobert/pitstop-crew-public) (agent pipeline) | Replayed: its 62 recorded runs (653 steps) from a backup, with the original times | Built, checked |
 | [agent-eval-harness](https://github.com/NabilRobert/agent-eval-harness) (agent evaluation) | Replayed: its 20 published Inspect runs (1,777 samples, 7,068 real model calls), with the original times and each call's own cost | Built, checked |
-| [MCP security gateway](https://github.com/NabilRobert/mcp-security-gateway) | Live: a span per stage of every call, between the agent's and the MCP server's | Built on its branch; the full path passes the end-to-end check |
-| agent-eval-harness, live | A span per sample and per agent, with each MCP call under it ($0: its scripted agent, no model) | Built on its branch; the full path passes the end-to-end check |
+| [MCP security gateway](https://github.com/NabilRobert/mcp-security-gateway) | Live: a span per stage of every call, between the agent's and the MCP server's | Built, merged; the full path passes the end-to-end check |
+| agent-eval-harness, live | A span per sample and per agent, with each MCP call under it ($0: its scripted agent, no model) | Built, merged; the full path passes the end-to-end check |
 
 ## What it looks like
 
