@@ -53,9 +53,6 @@ listing Pagila's tables took 532 ms in MCP-backbone, and the gateway's
 
 ![One evaluation sample across the harness, the gateway and MCP-backbone in Jaeger](docs/img/end-to-end-harness-trace.png)
 
-The same path with a stand-in agent, before the harness's own was ready:
-[`docs/img/end-to-end-trace.png`](docs/img/end-to-end-trace.png).
-
 ## What's checked
 
 - **No content by default.** MCP-backbone records no SQL text, rejection
@@ -74,22 +71,16 @@ The same path with a stand-in agent, before the harness's own was ready:
   tokens add up to its recorded totals. `0 problems` on all 62 Pitstop
   runs and all 1,777 harness samples, checked against the viewer's API.
 - **Cheap, measured at the median and the tail.** Tracing adds
-  **+0.39 ms** to the median MCP-backbone tool call (95% CI +0.29 to
-  +0.50), **1.4%** of a 27 ms call, with the viewer up; building the spans
-  is about 80 µs of that (110 µs on, 31 µs off). At p95 and p99 there is
-  no detectable difference (+1.7 ms, CI −1.2 to +4.6; −0.3 ms, CI −13 to
-  +12). A first run showed p99 rising from 91 to 126 ms, but it ran while
-  the machine's load drifted upwards; on a quiet machine it didn't
-  reproduce. The one tail effect found: the 24 of 1,500 calls that ran
-  while the exporter was sending were all slower than the untraced p95,
-  against 4.3% of the other calls, so a send does slow the calls it
-  overlaps, but too rarely to move p99. Details:
+  **+0.39 ms** (**1.4%**) to the median MCP-backbone tool call, with no
+  detectable difference at p95 or p99; the one tail effect found (calls
+  that overlap an export are slower, too rarely to move p99) is explained,
+  with every number and confidence interval, in
   [`docs/mcp-backbone-overhead.md`](docs/mcp-backbone-overhead.md).
 - **Small.** Jaeger runs in 256 MB, keeping at most 5,000 traces in
-  memory: 79 MiB with both replays loaded (29,500 spans). Its disk store
-  was the first choice and peaked at 532 MiB on the same import, so it was
-  dropped; a restart now empties the viewer, and the replays refill it in
-  seconds.
+  memory: 79 MiB with both replays loaded (29,500 spans). Why not on disk:
+  the as-built note on
+  [ADR-001](docs/planning/phase-5-architecture-decisions.md#adr-001-the-viewer-is-jaeger-v2-in-one-container-with-badger-storage). A restart empties the viewer, and the
+  replays refill it in seconds.
 - Every new test was mutation-checked: 12 mutations in MCP-backbone and
   20 in the replays, all caught. One exposed a real bug (the exporter
   ignored the endpoint it was given), now fixed.
@@ -106,8 +97,15 @@ docker compose -f viewer/compose.yaml up -d
 uv run python viewer/smoke.py
 ```
 
-The UI is at http://127.0.0.1:16686. On the shared server, follow
-[`viewer/RUNBOOK.md`](viewer/RUNBOOK.md).
+(`viewer/smoke.sh` does the same with only `curl`.) The viewer is Jaeger
+v2 in one container, every port on `127.0.0.1`:
+
+- UI: http://127.0.0.1:16686 (no login; ADR-007)
+- OTLP/HTTP in: http://127.0.0.1:4318 (a source's
+  `OTEL_EXPORTER_OTLP_ENDPOINT`)
+- Query API: `/api/v3/...` (Jaeger 2.22 serves only v3)
+
+On the shared server, follow [`viewer/RUNBOOK.md`](viewer/RUNBOOK.md).
 
 Replay Pitstop's traces (needs the private backup):
 
@@ -141,9 +139,7 @@ uv run python -m e2e.check
 
 The check passes when the latest trace has one root, no span whose parent
 is missing, every service on the path, and a database stage reached
-through them in order. With the gateway's tracing branch
-(`--gateway-ref feat/otel-tracing`, until it merges) it passes: one
-trace, three services, down to the database.
+through them in order.
 
 Replay the harness's published runs (needs a clone of agent-eval-harness;
 read with `git show`, so its checkout isn't touched):
@@ -170,11 +166,9 @@ uv run pytest
   from the problem brief to the slice plan, with an index of the
   decisions (ADR-001 to 009) and the spike results.
 - [`docs/mcp-backbone-overhead.md`](docs/mcp-backbone-overhead.md): what
-  tracing costs an MCP-backbone tool call, measured (the raw numbers are
-  in the `.json` beside it).
-- [`viewer/README.md`](viewer/README.md) and
-  [`viewer/RUNBOOK.md`](viewer/RUNBOOK.md): running the viewer locally,
-  and on the shared server.
+  tracing costs an MCP-backbone tool call, measured.
+- [`viewer/RUNBOOK.md`](viewer/RUNBOOK.md): the viewer on the shared
+  server (running it locally: "Run it" above).
 - [`docs/img/`](docs/img/): the screenshots used above.
 
 ## License
