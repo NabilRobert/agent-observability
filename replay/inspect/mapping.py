@@ -74,127 +74,139 @@ def _model_parts(model: str) -> tuple[str, str]:
     return provider.removesuffix("-api"), rest.rsplit("/", 1)[-1] or model
 
 
+@dataclass
+class _Draft:
+    """One span before it's placed in its trace: what the builders below
+    return, so that none of them needs the trace ID or the resource."""
+
+    name: str
+    span_id: int
+    parent_id: int | None  # None only for the sample's root span
+    start: int
+    end: int
+    attributes: dict[str, AttributeValue]
+    kind: SpanKind = SpanKind.INTERNAL
+    status: Status | None = None
+
+
+@dataclass(frozen=True)
+class _SampleEvents:
+    """One sample's events, indexed the way the builders below need them."""
+
+    root_id: int
+    end: int
+    begins: dict[str, Mapping[str, Any]]
+    ends: dict[str, Mapping[str, Any]]
+    # Each Inspect "tool" span wraps one tool event, recorded on the span's
+    # parent; matched in order by (parent span, tool name).
+    tools: dict[tuple[str, str], deque[Mapping[str, Any]]]
+
+    @classmethod
+    def index(cls, data: Mapping[str, Any]) -> _SampleEvents:
+        events: list[Mapping[str, Any]] = data["events"]
+        tools: dict[tuple[str, str], deque[Mapping[str, Any]]] = {}
+        for e in events:
+            if e["event"] == "tool":
+                tools.setdefault((e["span_id"], e["function"]), deque()).append(e)
+        return cls(
+            root_id=_span_id(f"{data['uuid']}/sample"),
+            end=to_unix_nanos(parse_time(data["completed_at"])),
+            begins={e["id"]: e for e in events if e["event"] == "span_begin"},
+            ends={e["id"]: e for e in events if e["event"] == "span_end"},
+            tools=tools,
+        )
+
+    def parent_of(self, inspect_span: str | None) -> int:
+        if inspect_span is not None and inspect_span in self.begins:
+            return _span_id(inspect_span)
+        return self.root_id
+
+
 def spans_for(
     sample: Sample, *, resource: Resource, include_content: bool = False
 ) -> list[ReadableSpan]:
-    """Every span of one sample's trace: the sample's root span first."""
+    """Every span of one sample's trace: the sample's root span first, then
+    Inspect's own spans, then the model calls, each in recorded order."""
     data = sample.data
+    indexed = _SampleEvents.index(data)
+    root = _Draft(
+        f"eval sample {data['id']}",
+        indexed.root_id,
+        None,
+        to_unix_nanos(parse_time(data["started_at"])),
+        indexed.end,
+        _sample_attributes(sample),
+    )
+    drafts = [root]
+    for key, begin in indexed.begins.items():
+        drafts.append(_inspect_span(indexed, key, begin, include_content))
+    for e in data["events"]:
+        if e["event"] == "model":
+            drafts.append(_model_call(e, indexed.parent_of(e.get("span_id")), include_content))
     trace_id = trace_id_for(sample)
-    root_id = _span_id(f"{data['uuid']}/sample")
-    sample_start = to_unix_nanos(parse_time(data["started_at"]))
-    sample_end = to_unix_nanos(parse_time(data["completed_at"]))
-    events: list[Mapping[str, Any]] = data["events"]
+    return [_readable(d, trace_id, resource) for d in drafts]
 
-    begins = {e["id"]: e for e in events if e["event"] == "span_begin"}
-    ends = {e["id"]: e for e in events if e["event"] == "span_end"}
-    # Each Inspect "tool" span wraps one tool event, recorded on the span's
-    # parent; matched in order by (parent span, tool name).
-    tool_events: dict[tuple[str, str], deque[Mapping[str, Any]]] = {}
-    for e in events:
-        if e["event"] == "tool":
-            tool_events.setdefault((e["span_id"], e["function"]), deque()).append(e)
 
+def _readable(draft: _Draft, trace_id: int, resource: Resource) -> ReadableSpan:
     def context(span_id: int) -> SpanContext:
         return SpanContext(trace_id, span_id, is_remote=False, trace_flags=_FLAGS)
 
-    def parent_of(inspect_span: str | None) -> SpanContext:
-        if inspect_span is not None and inspect_span in begins:
-            return context(_span_id(inspect_span))
-        return context(root_id)
+    return ReadableSpan(
+        name=draft.name,
+        context=context(draft.span_id),
+        parent=None if draft.parent_id is None else context(draft.parent_id),
+        resource=resource,
+        attributes=draft.attributes,
+        kind=draft.kind,
+        status=draft.status or Status(StatusCode.UNSET),
+        start_time=draft.start,
+        end_time=draft.end,
+        instrumentation_scope=SCOPE,
+    )
 
-    def make(
-        name: str,
-        span_id: int,
-        parent: SpanContext | None,
-        start: int,
-        end: int,
-        attributes: dict[str, AttributeValue],
-        kind: SpanKind = SpanKind.INTERNAL,
-        status: Status | None = None,
-    ) -> ReadableSpan:
-        return ReadableSpan(
-            name=name,
-            context=context(span_id),
-            parent=parent,
-            resource=resource,
-            attributes=attributes,
-            kind=kind,
-            status=status or Status(StatusCode.UNSET),
-            start_time=start,
-            end_time=end,
-            instrumentation_scope=SCOPE,
-        )
 
-    spans = [
-        make(
-            f"eval sample {data['id']}",
-            root_id,
-            None,
-            sample_start,
-            sample_end,
-            _sample_attributes(sample),
-        )
-    ]
+def _inspect_span(
+    indexed: _SampleEvents, key: str, begin: Mapping[str, Any], include_content: bool
+) -> _Draft:
+    """One of Inspect's own spans (solver, agent, tool, scorer, ...)."""
+    end_event = indexed.ends.get(key)
+    kind_name, name = begin.get("type") or "", begin["name"]
+    draft = _Draft(
+        name,
+        _span_id(key),
+        indexed.parent_of(begin.get("parent_id")),
+        to_unix_nanos(parse_time(begin["timestamp"])),
+        to_unix_nanos(parse_time(end_event["timestamp"])) if end_event else indexed.end,
+        {"inspect.span.type": kind_name},
+    )
+    if end_event is None:
+        draft.attributes["inspect.span.unfinished"] = True
+    if kind_name == "agent":
+        draft.name = f"invoke_agent {name}"
+        draft.attributes["gen_ai.operation.name"] = "invoke_agent"
+        draft.attributes["gen_ai.agent.name"] = name
+    elif kind_name == "tool":
+        queue = indexed.tools.get((begin.get("parent_id") or "", name))
+        _add_tool_call(draft, name, queue.popleft() if queue else None, include_content)
+    elif kind_name and name != kind_name:
+        draft.name = f"{kind_name} {name}"
+    return draft
 
-    for span_key, begin in begins.items():
-        start = to_unix_nanos(parse_time(begin["timestamp"]))
-        end_event = ends.get(span_key)
-        end = to_unix_nanos(parse_time(end_event["timestamp"])) if end_event else sample_end
-        kind_name, name = begin.get("type") or "", begin["name"]
-        attrs: dict[str, AttributeValue] = {"inspect.span.type": kind_name}
-        if end_event is None:
-            attrs["inspect.span.unfinished"] = True
-        status = None
-        if kind_name == "agent":
-            attrs["gen_ai.operation.name"] = "invoke_agent"
-            attrs["gen_ai.agent.name"] = name
-            span_name = f"invoke_agent {name}"
-        elif kind_name == "tool":
-            attrs.update(
-                {
-                    "gen_ai.operation.name": "execute_tool",
-                    "gen_ai.tool.name": name,
-                    "gen_ai.tool.type": "function",
-                }
-            )
-            queue = tool_events.get((begin.get("parent_id") or "", name))
-            event = queue.popleft() if queue else None
-            if event is not None:
-                attrs["gen_ai.tool.call.id"] = event["id"]
-                if include_content:
-                    attrs["gen_ai.tool.call.arguments"] = json.dumps(event.get("arguments"))
-                status = _tool_status(event, attrs, include_content)
-            span_name = f"execute_tool {name}"
-        else:
-            span_name = name if name == kind_name or not kind_name else f"{kind_name} {name}"
-        spans.append(
-            make(
-                span_name,
-                _span_id(span_key),
-                parent_of(begin.get("parent_id")),
-                start,
-                end,
-                attrs,
-                status=status,
-            )
-        )
 
-    for e in events:
-        if e["event"] == "model":
-            name, start, end, attrs, status = _model_call(e, include_content)
-            spans.append(
-                make(
-                    name,
-                    _span_id(e["uuid"]),
-                    parent_of(e.get("span_id")),
-                    start,
-                    end,
-                    attrs,
-                    kind=SpanKind.CLIENT,
-                    status=status,
-                )
-            )
-    return spans
+def _add_tool_call(
+    draft: _Draft, name: str, event: Mapping[str, Any] | None, include_content: bool
+) -> None:
+    draft.name = f"execute_tool {name}"
+    attrs = draft.attributes
+    attrs["gen_ai.operation.name"] = "execute_tool"
+    attrs["gen_ai.tool.name"] = name
+    attrs["gen_ai.tool.type"] = "function"
+    if event is None:
+        return
+    attrs["gen_ai.tool.call.id"] = event["id"]
+    if include_content:
+        attrs["gen_ai.tool.call.arguments"] = json.dumps(event.get("arguments"))
+    draft.status = _tool_status(event, attrs, include_content)
 
 
 def _sample_attributes(sample: Sample) -> dict[str, AttributeValue]:
@@ -246,10 +258,8 @@ def _tool_status(
     return Status(StatusCode.ERROR, error.get("message") if include_content else None)
 
 
-def _model_call(
-    e: Mapping[str, Any], include_content: bool
-) -> tuple[str, int, int, dict[str, AttributeValue], Status | None]:
-    """Name, start, end, attributes and status of one model call."""
+def _model_call(e: Mapping[str, Any], parent_id: int, include_content: bool) -> _Draft:
+    """One model call, as a client span."""
     provider, model = _model_parts(e["model"])
     start = to_unix_nanos(parse_time(e["timestamp"]))
     attrs: dict[str, AttributeValue] = {
@@ -286,4 +296,6 @@ def _model_call(
         message = str(e["error"])
         attrs["error.type"] = message.split("(", 1)[0] or "inspect.model_error"
         status = Status(StatusCode.ERROR, message if include_content else None)
-    return f"chat {model}", start, end, attrs, status
+    return _Draft(
+        f"chat {model}", _span_id(e["uuid"]), parent_id, start, end, attrs, SpanKind.CLIENT, status
+    )
