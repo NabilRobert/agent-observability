@@ -21,7 +21,7 @@ its six stages) through MCP-backbone's own tracer, many times over.
 
     uv run --project <MCP-backbone checkout> python demos/mcp_backbone_overhead.py <checkout>
 
-Writes docs/mcp-backbone-overhead.md and .json. Needs the viewer running.
+Writes docs/mcp-backbone-overhead.md. Needs the viewer running.
 """
 
 import argparse
@@ -299,12 +299,8 @@ async def run(checkout: Path, calls: int, warmup: int, rounds: int) -> None:
         "cpus": CPUS,
         "max_load_1min": max(loads),
     }
-    OUT.with_suffix(".json").write_text(
-        json.dumps({"environment": environment, "results": stats, "per_round": per_round}, indent=2)
-        + "\n"
-    )
     OUT.with_suffix(".md").write_text(_report(environment, stats, per_round))
-    print(f"wrote {OUT.with_suffix('.md').name} and {OUT.with_suffix('.json').name}")
+    print(f"wrote {OUT.with_suffix('.md').name}")
 
 
 def _git_version(checkout: Path) -> str:

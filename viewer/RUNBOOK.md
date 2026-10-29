@@ -8,7 +8,8 @@ by SSH tunnel).
 
 `<server>` and `<user>` stand for the server's SSH host and login; they
 are not written down here on purpose. Commands marked *laptop* run on your
-own machine; all others run on the server.
+own machine; all others run on the server. To run the viewer locally
+instead, see "Run it" in the [README](../README.md#run-it).
 
 ## What runs
 
