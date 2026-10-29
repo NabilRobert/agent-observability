@@ -100,8 +100,8 @@ then http://127.0.0.1:26686). Stop the tunnel with Ctrl-C.
 
 ## Send MCP-backbone's traces
 
-Needs an MCP-backbone build with tracing (the `feat/otel-tracing` branch,
-deployed with the steps in its own `deploy/RUNBOOK.md`).
+Needs an MCP-backbone build with tracing (its `main` has it since the
+tracing PR merged), deployed with the steps in its own `deploy/RUNBOOK.md`.
 
 MCP-backbone reads the endpoint from its **process environment**, not from
 its `.env` file (that file only supplies `APP_*` settings), so it goes in a
