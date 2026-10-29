@@ -158,8 +158,22 @@ Tests:
 uv run pytest
 ```
 
+## Layout
+
+| Folder | What it does |
+|---|---|
+| `viewer/` | The trace viewer (Jaeger) and its smoke check and runbook |
+| `replay/` | Rebuilds traces from records: `pitstop/`, `inspect/`, and the shared `common.py` |
+| `e2e/` | The end-to-end check: one trace across every service, down to the database |
+| `demos/` | Runs the live path locally, and the overhead benchmark |
+| `tests/` | The mappings and checks, on synthetic records |
+| `docs/` | The guide, the conventions, the planning trail, the benchmark result |
+
 ## Docs
 
+- [`docs/guide.md`](docs/guide.md): start here. Each flow step by step
+  (a live tool call, the end-to-end trace, the two replays), a glossary,
+  and where to change things.
 - [`docs/conventions.md`](docs/conventions.md): the span names and
   attributes every source follows.
 - [`docs/planning/`](docs/planning/): the plan, in order: Phases 1–7
