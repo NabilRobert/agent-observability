@@ -6,7 +6,7 @@ Each pipeline run becomes one trace. IDs are derived from the run and
 step IDs, so replaying the same snapshot twice gives the same IDs, and
 the times are the recorded ones, unshifted (Phase 5, ADR-006)."""
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
@@ -174,56 +174,77 @@ def span_for(step: Step, *, resource: Resource, include_content: bool = False) -
     )
 
 
-def _name_kind_attributes(
-    step: Step, include_content: bool
-) -> tuple[str, SpanKind, dict[str, AttributeValue]]:
+# A span's name, kind and attributes, as each kind of step maps them.
+_Mapped = tuple[str, SpanKind, dict[str, AttributeValue]]
+
+
+def _name_kind_attributes(step: Step, include_content: bool) -> _Mapped:
+    mapper = _MAPPERS.get(step.kind, _other_step)
+    return mapper(step, include_content)
+
+
+def _run_step(step: Step, include_content: bool) -> _Mapped:
     meta = step.meta
-    attrs: dict[str, AttributeValue] = {}
-
-    if step.kind == "run":
-        run_type = str(meta.get("run_type") or step.name.removesuffix(" run"))
-        attrs["pitstop.run.id"] = step.run_id
-        attrs["pitstop.run.type"] = run_type
-        if step.cost_usd is not None:
-            # The run's total, kept apart from agentobs.cost.usd so that
-            # summing a trace's costs never counts it twice (ADR-004).
-            attrs["pitstop.run.recorded_cost_usd"] = float(step.cost_usd)
-        attrs.update(_meta_attributes(meta, include_content))
-        if run_type == "backup":
-            return "run backup", SpanKind.INTERNAL, attrs
-        attrs["gen_ai.operation.name"] = "invoke_workflow"
-        attrs["gen_ai.workflow.name"] = run_type
-        return f"invoke_workflow {run_type}", SpanKind.INTERNAL, attrs
-
-    if step.kind == "agent":
-        attrs["gen_ai.operation.name"] = "invoke_agent"
-        attrs["gen_ai.agent.name"] = step.name
-        if isinstance(meta.get("agent_type"), str):
-            attrs["pitstop.agent.type"] = meta["agent_type"]
-        attrs.update(_meta_attributes(meta, include_content, skip=frozenset({"agent_type"})))
-        return f"invoke_agent {step.name}", SpanKind.INTERNAL, attrs
-
-    if step.kind == "critic_review":
-        # Recorded as e.g. "Ciri reviews analysis (pass 1)".
-        critic = f"{step.name.split(' reviews ', 1)[0]} (critic)"
-        attrs["gen_ai.operation.name"] = "invoke_agent"
-        attrs["gen_ai.agent.name"] = critic
-        attrs["pitstop.step.name"] = step.name
-        for key, attr in _CRITIC_KEYS.items():
-            if _is_scalar(meta.get(key)):
-                attrs[attr] = meta[key]
-        attrs.update(_meta_attributes(meta, include_content, skip=frozenset(_CRITIC_KEYS)))
-        return f"invoke_agent {critic}", SpanKind.INTERNAL, attrs
-
-    if step.kind == "llm_call":
-        attrs.update(_llm_attributes(step))
-        if include_content:
-            attrs.update(_meta_attributes(meta, True, skip=_LLM_KEYS))
-        return (f"chat {step.model}" if step.model else "chat"), SpanKind.CLIENT, attrs
-
-    # context, decision, revision, email, error: kept under their own names.
+    run_type = str(meta.get("run_type") or step.name.removesuffix(" run"))
+    attrs: dict[str, AttributeValue] = {"pitstop.run.id": step.run_id, "pitstop.run.type": run_type}
+    if step.cost_usd is not None:
+        # The run's total, kept apart from agentobs.cost.usd so that
+        # summing a trace's costs never counts it twice (ADR-004).
+        attrs["pitstop.run.recorded_cost_usd"] = float(step.cost_usd)
     attrs.update(_meta_attributes(meta, include_content))
-    return step.name, SpanKind.INTERNAL, attrs
+    if run_type == "backup":
+        return "run backup", SpanKind.INTERNAL, attrs
+    attrs["gen_ai.operation.name"] = "invoke_workflow"
+    attrs["gen_ai.workflow.name"] = run_type
+    return f"invoke_workflow {run_type}", SpanKind.INTERNAL, attrs
+
+
+def _agent_step(step: Step, include_content: bool) -> _Mapped:
+    meta = step.meta
+    attrs: dict[str, AttributeValue] = {
+        "gen_ai.operation.name": "invoke_agent",
+        "gen_ai.agent.name": step.name,
+    }
+    if isinstance(meta.get("agent_type"), str):
+        attrs["pitstop.agent.type"] = meta["agent_type"]
+    attrs.update(_meta_attributes(meta, include_content, skip=frozenset({"agent_type"})))
+    return f"invoke_agent {step.name}", SpanKind.INTERNAL, attrs
+
+
+def _critic_step(step: Step, include_content: bool) -> _Mapped:
+    meta = step.meta
+    # Recorded as e.g. "Ciri reviews analysis (pass 1)".
+    critic = f"{step.name.split(' reviews ', 1)[0]} (critic)"
+    attrs: dict[str, AttributeValue] = {
+        "gen_ai.operation.name": "invoke_agent",
+        "gen_ai.agent.name": critic,
+        "pitstop.step.name": step.name,
+    }
+    for key, attr in _CRITIC_KEYS.items():
+        if _is_scalar(meta.get(key)):
+            attrs[attr] = meta[key]
+    attrs.update(_meta_attributes(meta, include_content, skip=frozenset(_CRITIC_KEYS)))
+    return f"invoke_agent {critic}", SpanKind.INTERNAL, attrs
+
+
+def _llm_step(step: Step, include_content: bool) -> _Mapped:
+    attrs = _llm_attributes(step)
+    if include_content:
+        attrs.update(_meta_attributes(step.meta, True, skip=_LLM_KEYS))
+    return (f"chat {step.model}" if step.model else "chat"), SpanKind.CLIENT, attrs
+
+
+def _other_step(step: Step, include_content: bool) -> _Mapped:
+    """context, decision, revision, email, error: kept under their own names."""
+    return step.name, SpanKind.INTERNAL, _meta_attributes(step.meta, include_content)
+
+
+_MAPPERS: dict[str, Callable[[Step, bool], _Mapped]] = {
+    "run": _run_step,
+    "agent": _agent_step,
+    "critic_review": _critic_step,
+    "llm_call": _llm_step,
+}
 
 
 def _llm_attributes(step: Step) -> dict[str, AttributeValue]:

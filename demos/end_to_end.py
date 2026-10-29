@@ -38,6 +38,7 @@ import tempfile
 import time
 import urllib.request
 from collections.abc import Iterator
+from dataclasses import dataclass
 from pathlib import Path
 
 from backbone import seeded, use_test_database
@@ -166,7 +167,15 @@ def pagila_proxy() -> Iterator[None]:
         subprocess.run(["docker", "rm", "-f", name], check=False, capture_output=True)
 
 
-def harness_agent(harness: Path, caller_key: str, tasks: str) -> int:
+@dataclass(frozen=True)
+class HarnessAgent:
+    """`--agent harness`: which checkout to run, on which Pagila tasks."""
+
+    checkout: Path
+    tasks: str
+
+
+def harness_agent(harness: HarnessAgent, caller_key: str) -> int:
     """The harness's scripted Pagila agent, through the gateway; traced as
     the harness itself traces (service agent-eval-harness)."""
     env = {k: v for k, v in os.environ.items() if not k.startswith(("OTEL_", "APP_"))}
@@ -174,8 +183,8 @@ def harness_agent(harness: Path, caller_key: str, tasks: str) -> int:
     env |= {"OTEL_EXPORTER_OTLP_ENDPOINT": OTLP, "MCP_GATEWAY_KEY": caller_key}
     out = subprocess.run(
         ["uv", "run", "--locked", "python", "scripts/scripted_pagila_agent.py",
-         "--target", "mcp-backbone-gateway", "--tasks", tasks],
-        cwd=harness, env=env, capture_output=True, text=True, check=False,
+         "--target", "mcp-backbone-gateway", "--tasks", harness.tasks],
+        cwd=harness.checkout, env=env, capture_output=True, text=True, check=False,
     )  # fmt: skip
     for line in (out.stdout + out.stderr).strip().splitlines()[-6:]:
         print(f"harness: {line}")
@@ -229,9 +238,7 @@ async def agent(caller_key: str) -> None:
         provider.shutdown()
 
 
-async def run(
-    backbone: Path, gateway_repo: Path, ref: str, harness: Path | None, tasks: str
-) -> None:
+async def run(backbone: Path, gateway_repo: Path, ref: str, harness: HarnessAgent | None) -> None:
     WORK.mkdir(parents=True, exist_ok=True)
     gateway = export_gateway(gateway_repo, ref)
     use_test_database(backbone)
@@ -250,7 +257,7 @@ async def run(
     with contextlib.ExitStack() as stack:
         if harness:
             stack.enter_context(pagila_proxy())
-        await serve_and_run(backbone_cmd(), config, gateway, caller_key, target_url, harness, tasks)
+        await serve_and_run(config, gateway, caller_key, target_url, harness)
 
 
 def backbone_cmd() -> list[str]:
@@ -261,13 +268,11 @@ def backbone_cmd() -> list[str]:
 
 
 async def serve_and_run(
-    backbone_cmd: list[str],
     config: Path,
     gateway: Path,
     caller_key: str,
     target_url: str | None,
-    harness: Path | None,
-    tasks: str,
+    harness: HarnessAgent | None,
 ) -> None:
     async with seeded(query_rate_limit=10**6, target_url=target_url) as backbone_key:
         traced = {**os.environ, "OTEL_EXPORTER_OTLP_ENDPOINT": OTLP}
@@ -278,7 +283,7 @@ async def serve_and_run(
         }
         gateway_env.pop("VIRTUAL_ENV", None)  # the gateway's own environment, not this one
         with running(
-            backbone_cmd,
+            backbone_cmd(),
             {**traced, "OTEL_SERVICE_NAME": "mcp-backbone"},
             WORK,  # not the checkout, so its .env isn't read
             WORK / "mcp-backbone.log",
@@ -303,7 +308,7 @@ async def serve_and_run(
                     WORK / "gateway.log",
                 )
                 if harness:
-                    code = harness_agent(harness, caller_key, tasks)
+                    code = harness_agent(harness, caller_key)
                     print(f"harness agent exit code: {code} (0: every trial passed)")
                 else:
                     await agent(caller_key)
@@ -322,10 +327,8 @@ def main() -> None:
     args = parser.parse_args()
     if args.agent == "harness" and not args.harness:
         parser.error("--agent harness needs --harness <agent-eval-harness checkout>")
-    harness = args.harness.resolve() if args.agent == "harness" else None
-    asyncio.run(
-        run(args.backbone.resolve(), args.gateway.resolve(), args.gateway_ref, harness, args.tasks)
-    )
+    harness = HarnessAgent(args.harness.resolve(), args.tasks) if args.agent == "harness" else None
+    asyncio.run(run(args.backbone.resolve(), args.gateway.resolve(), args.gateway_ref, harness))
 
 
 if __name__ == "__main__":
