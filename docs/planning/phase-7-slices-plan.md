@@ -50,6 +50,11 @@ in one trace of 36 spans from three services; `e2e.check` passes its
 default path, agent-eval-harness → mcp-security-gateway → mcp-backbone.
 What remains is deployment (slice 7) and the write-up.
 
+**Slice 7 done:** the viewer is deployed on the shared server from
+[`viewer/RUNBOOK.md`](../../viewer/RUNBOOK.md), private (bound to
+loopback, reached only through an SSH tunnel), with MCP-backbone's
+tracing on. A live tool call was confirmed arriving as a trace in it.
+
 **Order:** spikes → 0 → 1 → 2 → 3 → checkpoint → (4, by the gateway
 session) → 5 → 6 → 7. Slices 2 and 3 touch different repos and could run
 in parallel.
@@ -105,4 +110,4 @@ If time runs short, cut in this order:
   database) and one per weekly pipeline run, with the trace ID stored on
   its own per-call records. Juku owns its metrics, dashboards and alerts;
   all it needs from here is the viewer deployed on the server (slice 7)
-  before it launches.
+  before it launches; that's done.
