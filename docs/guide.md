@@ -53,14 +53,18 @@ rules and checks the result.
    trace.
 3. **Authenticate.** `app/mcp/server.py: run_query` calls `_authenticate`,
    which wraps its work in `stage("authenticate")`.
-4. **The query's stages.** `app/query/service.py: run_query` runs each
-   stage inside its own `stage(...)`:
-   `_check_rate_limit` (`rate_limit`), `_validate` (`validate`),
-   `_estimate_cost` (`cost_check`), `_execute` (`execute`), and, through
-   `_finish`, `write_audit` (`audit`).
-5. **A stage that fails.** `app/tracing.py: stage` catches the exception,
-   and `mark_failed` sets `error.type` (a short, safe label). The
-   human-readable reason goes on the span only if
+4. **The query's stages.** `app/query/service.py: run_query` first checks
+   the target database's address (`ensure_target_allowed`, not a stage of
+   its own). Then it runs each stage inside its own `stage(...)`:
+   `_check_rate_limit` (`rate_limit`), `_validate` (`validate`), then,
+   inside `_query_target`, `_estimate_cost` (`cost_check`) and `_execute`
+   (`execute`). Every ending goes through `_finish`, which calls
+   `write_audit` (`audit`).
+5. **A stage that fails.** If an exception escapes a stage,
+   `app/tracing.py: stage` marks the span with the exception's class name
+   and lets it carry on. A stage that refuses the query instead calls
+   `mark_failed` itself, with a short, safe label in `error.type`. Either
+   way, the human-readable reason goes on the span only if
    `APP_OTEL_CAPTURE_CONTENT` is on, because a reason can quote the SQL.
 6. **Sending.** Finished spans wait in a queue. A background thread sends
    them in batches over OTLP to the viewer's port 4318. A dead viewer
@@ -120,8 +124,11 @@ database. `demos/end_to_end.py` sets it all up locally.
 5. **In the gateway.** The SDK's server span, `tools/call run_query`,
    picks the context up. `src/mcp_gateway/proxy.py: Route._call_tool` runs
    the stages `rate_limit`, `policy`, `audit`, `forward`, `detect` and
-   `audit` again. The call to MCP-backbone happens inside `forward`, so
-   MCP-backbone's spans land under it.
+   `audit` again. If the tool hasn't been screened yet, `policy` lists
+   and screens it inside its own span. A separate `screen_tools` span
+   appears only when the agent lists the tools. The call to
+   MCP-backbone happens inside `forward`, so MCP-backbone's spans land
+   under it.
 6. **In MCP-backbone.** Flow 1, down to the database.
 7. **Check the trace.** `e2e/check.py: main` finds the newest trace with
    `latest_trace` (which uses `replay/common.py: query_traces`), fetches
@@ -165,14 +172,19 @@ turns those records into the spans Pitstop would have sent.
    `replay/common.py: send_spans`, which sends them in batches of
    `BATCH`.
 6. **Check.** `replay/pitstop/replay.py: check` fetches each run's trace back from the
-   viewer and runs `check_run`: `replay/common.py: compare_spans` for fidelity,
-   then the cost check (each run's model-call costs add up to its
-   recorded total, within `COST_TOLERANCE_PER_CALL`).
+   viewer and runs `check_run`. That does its own fidelity check against
+   the recorded steps, not `compare_spans`: every step once, the same
+   parent, the same start to the microsecond and the same duration to
+   the millisecond. Then comes the cost check: each run's model-call
+   costs add up to its recorded total, within `COST_TOLERANCE_PER_CALL`
+   per call.
 
 ## Flow 4: replaying the harness's Inspect logs
 
 1. **Extract.** `replay/inspect/run.sh` reads every `runs/*/inspect.eval`
-   from the harness repo with `git show`, into `replay/inspect/out/`.
+   from the harness repo with `git show`, into `replay/inspect/out/`. It
+   reads them at a git ref, `origin/main` by default. To pass
+   `--include-content`, give the ref first, because it's read by position.
 2. **Load.** `replay/inspect/replay.py: main` (action `send`) calls
    `load`, which uses `replay/inspect/mapping.py: read_eval` to open each log (a zip of
    JSON files) as a list of `Sample`s.
@@ -208,7 +220,9 @@ flowchart LR
 `run` refuses to start on a busy machine, then runs `measure` in a fresh
 process per mode (`MODES`: tracing off, on, and on with a dead viewer),
 several rounds in rotating order. `_time_span_trees` times the tracing
-work alone. `_record_exports` and `_overlaps` find the calls that ran
+work alone. If the load rises above the number of CPUs during the
+measurement, the whole run is thrown away. `_record_exports` and
+`_overlaps` find the calls that ran
 while a batch was being sent. `_percentile` and `_diff_ci` give each
 difference with a bootstrap confidence interval, and `_report` writes
 [`mcp-backbone-overhead.md`](mcp-backbone-overhead.md).
@@ -218,8 +232,9 @@ difference with a bootstrap confidence interval, and `_report` writes
 - **Trace:** everything one request did, as a tree of spans. Here: one
   tool call, one Pitstop run, or one Inspect sample.
 - **Span:** one timed step in a trace, with a name, a start, an end and
-  attributes. Built in `app/tracing.py: stage` (live) and
-  `replay/*/mapping.py` (replayed).
+  attributes. Built live by the MCP SDK and by each source's own code
+  (MCP-backbone's and the gateway's `stage`, the harness's
+  `traced_agent`), and in `replay/*/mapping.py` when replayed.
 - **Root span / parent span:** a span's parent is the step it ran
   inside. The root has no parent. `e2e/check.py: check_trace` checks that
   there's exactly one root.
@@ -229,12 +244,16 @@ difference with a bootstrap confidence interval, and `_report` writes
 - **Attribute:** a key and value on a span, such as `gen_ai.request.model`
   or `error.type`. Which ones each source sets: [`conventions.md`](conventions.md).
 - **Resource / `service.name`:** who sent a span, such as `mcp-backbone`
-  or `pitstop`. Set in each `resource_for`.
+  or `pitstop`. A replay sets it in its `resource_for`. A live source
+  takes it from `OTEL_SERVICE_NAME`, or uses its own name by default.
 - **Trace context / `traceparent`:** the trace ID and parent span ID,
   passed from one process to the next so their spans join one trace.
 - **`params._meta`:** a free-form field on every MCP request. The MCP SDK
-  carries the trace context there, and the gateway passes the rest
-  through unchanged.
+  carries the trace context there, as `traceparent`. The gateway doesn't
+  pass it on unchanged. It drops the keys that belong to the agent's own
+  connection and stamps in the caller's ID. The SDK then writes the
+  gateway's own trace context, so the upstream's spans nest under
+  `forward`.
 - **OpenTelemetry:** the open standard (and its SDKs) for producing
   traces. Every source here uses its Python SDK.
 - **OTLP:** OpenTelemetry's wire format. Spans are posted to the viewer's
