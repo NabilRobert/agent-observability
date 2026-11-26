@@ -1,4 +1,5 @@
-# Lint, type-check and test on every push to main and every pull request.
+# Lint, type-check, test and scan for secrets on every push to main and
+# every pull request.
 # Needs no secrets, no Docker and no Pitstop backup: the tests run on a
 # synthetic fixture, and anything that needs the viewer or the backup
 # (viewer/smoke.*, replay/pitstop/run.sh, demos/) is run by hand.
@@ -16,8 +17,13 @@ jobs:
   check:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    env:
+      GITLEAKS_VERSION: "8.30.1"
     steps:
       - uses: actions/checkout@v4
+        with:
+          # gitleaks scans every commit, not only the last one.
+          fetch-depth: 0
       - uses: astral-sh/setup-uv@v6
         with:
           python-version: "3.14"
@@ -26,3 +32,13 @@ jobs:
       - run: uv run --frozen ruff format --check .
       - run: uv run --frozen pyright
       - run: uv run --frozen pytest
+      # The gitleaks steps are copied from financed-the-tracker's CI (0b5fd91).
+      - name: Install gitleaks, checked against its published checksum
+        run: |
+          base="https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}"
+          archive="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          curl -sSfLO "${base}/${archive}"
+          curl -sSfL "${base}/gitleaks_${GITLEAKS_VERSION}_checksums.txt" | grep " ${archive}$" | sha256sum -c -
+          tar -xzf "${archive}" gitleaks
+          sudo install gitleaks /usr/local/bin/gitleaks
+      - run: gitleaks git --no-banner --redact .
